@@ -11,7 +11,7 @@ class IKNode(Node):
     def __init__(self):
         super().__init__("ik_node")
 
-        self.declare_parameter("mode", "bicycle")
+        self.declare_parameter("mode", "car")
         self.mode = self.get_parameter("mode").get_parameter_value().string_value
 
         self.timer = self.create_timer(100, self.timer_callback)

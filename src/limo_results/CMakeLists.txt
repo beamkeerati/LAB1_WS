@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(limo_controller)
+project(limo_results)
 
 # Default to C99
 if(NOT CMAKE_C_STANDARD)
@@ -28,9 +28,6 @@ ament_python_install_package(${PROJECT_NAME})
 # Install Python executables
 install(PROGRAMS
   scripts/dummy_script.py
-  scripts/inverse_kinematics.py
-  scripts/forward_kinematics.py
-  scripts/pure_pursuit.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -51,8 +48,6 @@ install(TARGETS
 ################ INSTALL LAUNCH, ETC #################
 install(DIRECTORY
   # add directories here
-  launch
-  path
   DESTINATION share/${PROJECT_NAME})
 
 ament_package()
