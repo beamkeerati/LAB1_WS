@@ -28,6 +28,8 @@ ament_python_install_package(${PROJECT_NAME})
 # Install Python executables
 install(PROGRAMS
   scripts/dummy_script.py
+  scripts/limo_plot.py
+  scripts/limo_path.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

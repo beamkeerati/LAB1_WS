@@ -36,3 +36,6 @@ ros2 launch limo_bringup limo_bringup_1.1.launch.py
 ## Notes
 - Ensure your ROS 2 environment is sourced before running (source install/setup.bash).
 - If dependencies are missing, rerun rosdep install.
+- Try this command if there's an unexpected error with dependencies `sudo apt install -y ros-humble-rqt-common-plugins ros-humble-tf2-ros`
+
+## Results
