@@ -32,8 +32,9 @@ class PurePursuitNode(Node):
         self.steering_pub = self.create_publisher(Float64MultiArray, "/steering_controller/commands", 10)
         self.velocity_pub = self.create_publisher(Float64MultiArray, "/velocity_controller/commands", 10)
         
-        self.yaml_lines = []
-        self.read_path()
+        self.path = []
+        self.path = self.read_path()
+        print(self.path)
 
 
     def pure_pursuit(self, x_tp, y_tp):
@@ -106,21 +107,36 @@ class PurePursuitNode(Node):
     def read_path(self):
         # Retrieve the package share directory for 'limo_controller'
         pkg_limo_controller = get_package_share_directory('limo_controller')
-        # Build the path to the YAML file
+        # Build the full file path to the YAML file
         yaml_path = os.path.join(pkg_limo_controller, 'path', 'path.yaml')
         
-        # Read the YAML file row by row
-        self.yaml_lines = []
         try:
             with open(yaml_path, 'r') as file:
-                for line in file:
-                    # Strip any extraneous whitespace/newlines
-                    clean_line = line.strip()
-                    self.yaml_lines.append(clean_line)
-                    # Log each line for debugging purposes
-                    self.get_logger().info(f"YAML line: {clean_line}")
+                # Load the YAML file into a Python data structure
+                data = yaml.safe_load(file)
         except Exception as e:
             self.get_logger().error(f"Failed to read YAML file: {e}")
+            return None
+
+        try:
+            # Initialize an empty list to hold the path points
+            path_points = []
+            for point in data:
+                # Extract the required keys from each dictionary
+                x = point.get('x')
+                y = point.get('y')
+                yaw = point.get('yaw')
+                if x is None or y is None or yaw is None:
+                    self.get_logger().warn("One of the points is missing a required key: 'x', 'y', or 'yaw'.")
+                    continue
+                path_points.append([x, y, yaw])
+            # Convert the list of points into a 2D NumPy array
+            path_array = np.array(path_points)
+            return path_array
+        except Exception as e:
+            self.get_logger().error(f"Error processing YAML data: {e}")
+        return None
+
 
 def main(args=None):
     rclpy.init(args=args)
