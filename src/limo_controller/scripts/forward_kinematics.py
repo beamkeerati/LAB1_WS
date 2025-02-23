@@ -121,7 +121,7 @@ class FKNode(Node):
         """Publish a static transform at the initial state one time."""
         static_transform = TransformStamped()
         static_transform.header.stamp = self.get_clock().now().to_msg()
-        static_transform.header.frame_id = "odom"
+        static_transform.header.frame_id = "world"
         static_transform.child_frame_id = "base_footprint"
         # Set initial transform values (adjust as necessary).
         # Here we assume an initial state at the origin with zero rotation.
