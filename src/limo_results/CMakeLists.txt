@@ -29,7 +29,9 @@ ament_python_install_package(${PROJECT_NAME})
 install(PROGRAMS
   scripts/dummy_script.py
   scripts/limo_plot.py
-  scripts/limo_path.py
+  scripts/limo_path_square.py
+  scripts/limo_path_circle.py
+  scripts/limo_path_wave.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
