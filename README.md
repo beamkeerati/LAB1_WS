@@ -39,3 +39,67 @@ ros2 launch limo_bringup limo_bringup_1.1.launch.py
 - Try this command if there's an unexpected error with dependencies `sudo apt install -y ros-humble-rqt-common-plugins ros-humble-tf2-ros`
 
 ## Results
+
+From this point, we will discuss the results observed from different trajectories plotted by subscribing to each topics and plot them into matplotlib.
+
+Note 1: 
+You might notice some unusual behavior in the ground truth values on the linear velocity graph. This is possibly due to errors in certain data topics. However, when compared to the PlotJuggler representation, the error values appear consistent.
+
+Note2:
+The straight line appearing before the graph's movement represents idle time before the actual movement is triggered.
+
+---
+Plotjuggler comparison
+![Plotjuggler.png](/images/Ground_Truth_Error_Proof_Bi_Square_0.3_-0.4.png)
+
+---
+
+### Circular Trajectory
+
+The yaw rate and single-track results are close to the ground truth, while the double-track result deviates significantly. This trend is also evident in the yaw graph and both velocity graphs.
+
+---
+Bicycle mode circular
+![Bicycle_Circle.png](/images/Bi_Circle_0.3_-0.4.png)
+
+---
+Car mode circular
+![Car_Circle.png](/images/Car_Circle_0.3_-0.4.png)
+
+---
+
+### Square Trajectory
+
+With this trajectory, we can clearly see that yaw rate—as the name suggests—does not struggle with the Z-angular position at all. However, its magnitude is slightly smaller compared to the ground truth. The other two models exhibit the same error trend, but the single-track model manages to keep the error small, whereas the double-track model shows a significantly larger error. Nonetheless, both exhibit incremental angle errors.
+
+In car mode, with no slip, the square trajectory is generated more accurately than in the bicycle model.
+
+---
+Bicycle mode square
+![Bicycle_Square.png](/images/Bi_Square_0.3_-0.4.png)
+
+---
+Car mode square
+![Car_Square.png](/images/Car_Square_0.3_-0.4.png)
+
+---
+
+### Wave Trajectory
+
+This trajectory retains the same fundamental characteristics as the previous one; however, upon closer examination, subtle differences emerge between left and right turns. Specifically, the trajectory reveals a slight asymmetry in the turning behavior, indicating that left and right turns do not exhibit identical dynamics. This discrepancy could stem from factors such as mechanical imbalances, sensor inaccuracies, or variations in control execution. Understanding and addressing these differences is crucial for improving trajectory consistency and overall system performance.
+
+---
+Bicycle mode wave
+![Bicycle_Wave.png](/images/Bi_Wave_0.3_-0.3.png)
+
+---
+Car mode wave
+![Car_Wave.png](/images/Car_Wave_0.3_-0.3.png)
+
+---
+
+### Summary
+
+This project implements a forward and inverse kinematics solution for a robotic vehicle using ROS 2. The forward kinematics (FK) node subscribes to joint state and IMU topics to compute the robot's odometry based on different kinematic models, such as double-track, single-track, and yaw-rate, and publishes the odometry data as `nav_msgs/Odometry`. The inverse kinematics (IK) node receives target linear and angular velocities and uses a control algorithm to compute the required wheel velocities, which are then sent to the vehicle's actuators. The FK model incorporates parameters such as wheelbase, track width, and yaw rate, while the IK model uses desired linear and angular velocity inputs to calculate the appropriate control outputs. Additionally, the system's state can be visualized in RViz, providing real-time feedback on the robot's position, velocity, and kinematic model. In simulation, the robot's behavior is modeled in Gazebo, allowing for testing of the kinematic models and actuator controls in a realistic virtual environment.
+
+Despite the ideal nature of the implemented models, several errors persist in each measurement method. These include discrepancies between the simulated and actual robot motion, errors in odometry calculations due to sensor inaccuracies, and deviations in control response when transitioning between different kinematic models. Although the system works well under ideal conditions, further tuning and sensor calibration will be necessary to reduce these errors and improve the overall performance for real-world applications.
