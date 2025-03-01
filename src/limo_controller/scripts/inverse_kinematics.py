@@ -5,6 +5,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Float64MultiArray
 import math
+import numpy as np
 
 
 class IKNode(Node):
@@ -48,13 +49,20 @@ class IKNode(Node):
 
         # Compute the basic steering angle based on the input twist message
         base_steering_angle = math.atan(self.l * msg.angular.z / msg.linear.x)
-
+        
+        # Clip the steering angle to the maximum and minimum values
+        angle_max = 10.0/180.0*math.pi
+        angle_min = -10.0/180.0*math.pi
+        base_steering_angle = np.clip(base_steering_angle, a_min = angle_min, a_max = angle_max) 
+        
+        # Compute individual wheel angles based on the control mode
         if mode == "bicycle":
             # In bicycle mode, both steering joints follow the same angle.
             left_angle = right_angle = base_steering_angle
 
         elif mode == "car":
             # In car mode, calculate individual wheel angles.
+            
             tan_steering = math.tan(base_steering_angle)
             left_angle = math.atan((self.l * tan_steering) / (self.l + 0.5 * self.track * tan_steering))
             right_angle = math.atan((self.l * tan_steering) / (self.l - 0.5 * self.track * tan_steering))

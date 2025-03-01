@@ -4,14 +4,13 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState, Imu
 from geometry_msgs.msg import (
-    Point, Pose, PoseWithCovariance, Quaternion, Twist, TwistWithCovariance,
+    Point, Pose, PoseStamped, PoseWithCovariance, Quaternion, Twist, TwistWithCovariance,
     Vector3, TransformStamped
 )
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, Path
 from std_msgs.msg import Float64, Float64MultiArray
-from tf_transformations import quaternion_from_euler
+from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
-import tf_transformations
 import math
 import numpy as np
 import os
@@ -22,107 +21,56 @@ class PurePursuitNode(Node):
     def __init__(self):
         super().__init__('pure_pursuit_node')
         
+        # Declare and retrieve parameters
         self.declare_parameter("mode", "car")
         self.mode = self.get_parameter("mode").get_parameter_value().string_value
-
+        
+        # Set up subscriber and timer
         self.odom_sub = self.create_subscription(Odometry, '/odometry/ground_truth', self.odom_callback, 10)
         self.create_timer(0.01, self.timer_callback)
         self.robot_odom = Odometry()
         
+        # Set up publishers
         self.steering_pub = self.create_publisher(Float64MultiArray, "/steering_controller/commands", 10)
         self.velocity_pub = self.create_publisher(Float64MultiArray, "/velocity_controller/commands", 10)
+        self.path_pub = self.create_publisher(Path, "/path", 10)
         
-        self.path = []
+        # Load the path from YAML into a NumPy array (each row: [x, y, yaw])
         self.path = self.read_path()
-        print(self.path)
-
-
-    def pure_pursuit(self, x_tp, y_tp):
-        # Compute the lookahead point
-        x = self.robot_odom.pose.pose.position.x - 0.1
-        y = self.robot_odom.pose.pose.position.y
-        K_dd = 0.5
-        min_ld = 0.1
-        max_ld = 1.0
-        speed = 0.5
+        self.path_index = 0  # pointer to the next target point
         
-        l_d = np.clip(K_dd * speed, min_ld, max_ld)
-        # Additional pure pursuit logic would go here
-
+        # Publish the full path as a nav_msgs/Path message
+        self.publish_path()
         
-    def timer_callback(self):
-        # Timer callback functionality (if any) would be implemented here
-        pass
-    
-    def cmd_vel_steering(self, vx, steering_angle):
-        # Retrieve control mode parameter
-        mode = self.get_parameter("mode").get_parameter_value().string_value
-
-        # If there's no forward motion, stop steering and velocity.
-        if vx == 0:
-            self.set_steering_angle(0, 0)
-            self.set_velocity(0, 0)
-            return
-
-        # Compute wheel speed common to both modes
-        wheel_speed = vx /self.wheel_radius
-
-        # Compute the basic steering angle based on the input twist message
-        base_steering_angle = steering_angle
-
-        if mode == "bicycle":
-            # In bicycle mode, both steering joints follow the same angle.
-            left_angle = right_angle = base_steering_angle
-
-        elif mode == "car":
-            # In car mode, calculate individual wheel angles.
-            tan_steering = math.tan(base_steering_angle)
-            left_angle = math.atan((self.l * tan_steering) / (self.l + 0.5 * self.track * tan_steering))
-            right_angle = math.atan((self.l * tan_steering) / (self.l - 0.5 * self.track * tan_steering))
-            
+        # Vehicle parameters (tune these as needed)
+        self.wheel_radius = 0.3    # [m]
+        self.l = 1.0               # parameter for "car" mode steering (wheelbase)
+        self.track = 0.5           # [m], track width
+        self.L = 1.0               # vehicle wheelbase used for steering angle calculation
+        
+        if self.path is not None:
+            self.get_logger().info(f"Loaded path with {self.path.shape[0]} points.")
         else:
-            self.get_logger().warn(f"Unknown mode: {mode}. Ignoring command.")
-            return
-
-        # Set computed steering angles and wheel speeds
-        self.set_steering_angle(left_angle, right_angle)
-        self.set_velocity(wheel_speed, wheel_speed)
+            self.get_logger().error("Path not loaded!")
     
-    def odom_callback(self, msg: Odometry):
-        self.robot_odom = msg
-        
-    
-    def set_steering_angle(self, left_steering_hinge_wheel, right_steering_hinge_wheel):
-        msg = Float64MultiArray()
-        msg.layout.data_offset = 0
-        msg.data = [float(left_steering_hinge_wheel), float(right_steering_hinge_wheel)]
-        self.steering_pub.publish(msg)
-
-    def set_velocity(self, rear_left_wheel, rear_right_wheel):
-        msg = Float64MultiArray()
-        msg.layout.data_offset = 0
-        msg.data = [float(rear_left_wheel), float(rear_right_wheel)]
-        self.velocity_pub.publish(msg)
-        
     def read_path(self):
-        # Retrieve the package share directory for 'limo_controller'
-        pkg_limo_controller = get_package_share_directory('limo_controller')
-        # Build the full file path to the YAML file
-        yaml_path = os.path.join(pkg_limo_controller, 'path', 'path.yaml')
-        
+        """
+        Reads a YAML file containing a list of points.
+        Each point is a dictionary with keys 'x', 'y', and 'yaw'.
+        Returns a NumPy array with shape (n, 3) where each row is [x, y, yaw].
+        """
+        pkg = get_package_share_directory('limo_controller')
+        yaml_path = os.path.join(pkg, 'path', 'path.yaml')
         try:
             with open(yaml_path, 'r') as file:
-                # Load the YAML file into a Python data structure
                 data = yaml.safe_load(file)
         except Exception as e:
             self.get_logger().error(f"Failed to read YAML file: {e}")
             return None
-
+        
         try:
-            # Initialize an empty list to hold the path points
             path_points = []
             for point in data:
-                # Extract the required keys from each dictionary
                 x = point.get('x')
                 y = point.get('y')
                 yaw = point.get('yaw')
@@ -130,13 +78,101 @@ class PurePursuitNode(Node):
                     self.get_logger().warn("One of the points is missing a required key: 'x', 'y', or 'yaw'.")
                     continue
                 path_points.append([x, y, yaw])
-            # Convert the list of points into a 2D NumPy array
-            path_array = np.array(path_points)
-            return path_array
+            return np.array(path_points)
         except Exception as e:
             self.get_logger().error(f"Error processing YAML data: {e}")
-        return None
+            return None
 
+    def publish_path(self):
+        """
+        Converts the loaded path (NumPy array of [x, y, yaw]) into a nav_msgs/Path message
+        and publishes it on the /path topic.
+        """
+        if self.path is None:
+            self.get_logger().error("No path to publish.")
+            return
+        
+        path_msg = Path()
+        # Set header: choose a frame (e.g., "map") and current time stamp.
+        path_msg.header.stamp = self.get_clock().now().to_msg()
+        path_msg.header.frame_id = "world"
+        
+        # Convert each point into a PoseStamped message.
+        for point in self.path:
+            pose_stamped = PoseStamped()
+            pose_stamped.header.stamp = self.get_clock().now().to_msg()
+            pose_stamped.header.frame_id = "map"
+            pose_stamped.pose.position.x = point[0]
+            pose_stamped.pose.position.y = point[1]
+            pose_stamped.pose.position.z = 0.0
+            q = quaternion_from_euler(0, 0, point[2])
+            pose_stamped.pose.orientation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
+            path_msg.poses.append(pose_stamped)
+        
+        self.path_pub.publish(path_msg)
+        self.get_logger().info("Published path message.")
+    
+
+    def pure_pursuit(self):
+
+        # Set a constant speed (this can be modified as needed)
+        speed = 0.5
+        
+        # Compute lookahead distance L_d; here, L_d is proportional to speed.
+        K_dd = 0.5
+        min_ld = 0.1
+        max_ld = 1.0
+        L_d = np.clip(K_dd * speed, min_ld, max_ld)
+        
+        # Get current vehicle state from odometry
+        x = self.robot_odom.pose.pose.position.x - 0.10
+        y = self.robot_odom.pose.pose.position.y
+        orientation_q = self.robot_odom.pose.pose.orientation
+        (_, _, yaw) = euler_from_quaternion([orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w])
+        
+ 
+    
+    def timer_callback(self):
+
+        self.publish_path()
+    
+    def cmd_vel_steering(self, vx, steering_angle):
+        mode = self.get_parameter("mode").get_parameter_value().string_value
+        if vx == 0:
+            self.set_steering_angle(0, 0)
+            self.set_velocity(0, 0)
+            return
+        
+        # Convert linear velocity to wheel speed using the wheel radius.
+        wheel_speed = vx / self.wheel_radius
+        
+        if mode == "bicycle":
+            left_angle = right_angle = steering_angle
+        elif mode == "car":
+            tan_steering = math.tan(steering_angle)
+            left_angle = math.atan((self.l * tan_steering) / (self.l + 0.5 * self.track * tan_steering))
+            right_angle = math.atan((self.l * tan_steering) / (self.l - 0.5 * self.track * tan_steering))
+        else:
+            self.get_logger().warn(f"Unknown mode: {mode}. Command ignored.")
+            return
+        
+        self.set_steering_angle(left_angle, right_angle)
+        self.set_velocity(wheel_speed, wheel_speed)
+    
+    def odom_callback(self, msg: Odometry):
+        self.robot_odom = msg
+        
+    def set_steering_angle(self, left_angle, right_angle):
+        msg = Float64MultiArray()
+        msg.layout.data_offset = 0
+        msg.data = [float(left_angle), float(right_angle)]
+        self.steering_pub.publish(msg)
+    
+    def set_velocity(self, left_speed, right_speed):
+        msg = Float64MultiArray()
+        msg.layout.data_offset = 0
+        msg.data = [float(left_speed), float(right_speed)]
+        self.velocity_pub.publish(msg)
 
 def main(args=None):
     rclpy.init(args=args)

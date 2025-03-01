@@ -14,16 +14,16 @@ def generate_launch_description():
     gazebo_models_path = 'models'
     package_name = 'limo_description'
     robot_name_in_model = 'limo_description'
-    rviz_config_file_path = 'rviz/lab1.rviz'
+    rviz_config_file_path = 'rviz/lab2.rviz'
     urdf_file_path = 'urdf/limo_ackerman.xacro'
     # world_file = 'l4rralde_gym.world'
     world_file = 'basic.world'
 
     # Pose where we want to spawn the robot
-    spawn_x_val = '0.0'
-    spawn_y_val = '0.0'
+    spawn_x_val = '9.073496746393584'
+    spawn_y_val = '0'
     spawn_z_val = '0.1'
-    spawn_yaw_val = '0.0'
+    spawn_yaw_val = '1.57'
 
     ############ You do not need to change anything below this line #############
 
