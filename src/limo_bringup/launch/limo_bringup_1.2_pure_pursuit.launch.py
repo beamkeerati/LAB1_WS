@@ -49,6 +49,6 @@ def generate_launch_description():
     # Declare the launch options
     ld.add_action(odom)
     ld.add_action(limo_description)
-    # ld.add_action(pure_pursuit)
+    ld.add_action(pure_pursuit)
 
     return ld

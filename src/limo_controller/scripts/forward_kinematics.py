@@ -327,13 +327,24 @@ class FKNode(Node):
         transform.transform.translation.z = msg.pose.pose.position.z
         transform.transform.rotation = msg.pose.pose.orientation
         
+        #Ground truth odometry
+        transform = TransformStamped()
+        transform.header.stamp = msg.header.stamp
+        transform.header.frame_id = "world"
+        transform.child_frame_id = "base_footprint"
+        transform.transform.translation.x = self.robot_odom.pose.pose.position.x
+        transform.transform.translation.y = self.robot_odom.pose.pose.position.y
+        transform.transform.translation.z = self.robot_odom.pose.pose.position.z
+        transform.transform.rotation = self.robot_odom.pose.pose.orientation
+        
+        self.static_tf_bc.sendTransform(transform)
+        
         if mode == "double_track":
             self.odom_double_track_publisher.publish(msg)
         elif mode == "single_track":
             self.odom_single_track_publisher.publish(msg)
         elif mode == "yaw_rate":
             self.odom_yaw_rate_publisher.publish(msg)
-            self.static_tf_bc.sendTransform(transform)
         else:
             pass
 
