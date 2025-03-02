@@ -204,10 +204,10 @@ class PurePursuitNode(Node):
         Finally, it commands the robot's velocity and steering.
         """
         # Set a constant speed
-        speed = 0.5
+        speed = 2.0
         K_dd = 0.5
         min_ld = 0.1
-        max_ld = 1.0
+        max_ld = 2.0
         L_d = np.clip(K_dd * speed, min_ld, max_ld)
         
         # Update current state from odometry (using a slight offset in x as in your original node)
@@ -254,6 +254,10 @@ class PurePursuitNode(Node):
             self.set_steering_angle(0, 0)
             self.set_velocity(0, 0)
             return
+        
+        angle_max = 10.0/180.0*math.pi
+        angle_min = -10.0/180.0*math.pi
+        steering_angle = np.clip(steering_angle, a_min = angle_min, a_max = angle_max)       
         
         # Convert linear velocity to wheel speed using the wheel radius.
         wheel_speed = vx / self.wheel_radius

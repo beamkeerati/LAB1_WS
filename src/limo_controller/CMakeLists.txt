@@ -31,6 +31,7 @@ install(PROGRAMS
   scripts/inverse_kinematics.py
   scripts/forward_kinematics.py
   scripts/pure_pursuit.py
+  scripts/stanley.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
