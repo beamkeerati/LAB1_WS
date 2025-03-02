@@ -52,7 +52,7 @@ class StanleyNode(Node):
         self.L = 1.0               # vehicle wheelbase used for front axle offset in Stanley control
         
         # Stanley controller parameters
-        self.k = 0.5               # control gain (tune as needed)
+        self.k = 5               # control gain (tune as needed)
         self.lastFoundIndex = 0    # pointer for target point (from Stanley algorithm)
         
         # State variables from odometry
