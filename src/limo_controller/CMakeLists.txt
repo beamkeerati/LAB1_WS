@@ -32,6 +32,7 @@ install(PROGRAMS
   scripts/forward_kinematics.py
   scripts/pure_pursuit.py
   scripts/stanley.py
+  scripts/pid.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
