@@ -71,14 +71,14 @@ def generate_launch_description():
         package="limo_controller",
         executable="pid.py",
         name="pid_node",
-        output="screen",
-        condition=IfCondition(PythonExpression(["'", LaunchConfiguration('controller'), "' == 'pid'"]))
+        output="screen"
     )
 
     # TimerAction to delay the PID node launch by 10 seconds.
     delayed_pid = TimerAction(
         period=10.0,
-        actions=[pid]
+        actions=[pid],
+        condition=IfCondition(PythonExpression(["'", LaunchConfiguration('controller'), "' == 'pid'"]))
     )
 
     # Create the launch description and populate it with the actions.
