@@ -33,6 +33,8 @@ install(PROGRAMS
   scripts/pure_pursuit.py
   scripts/stanley.py
   scripts/pid.py
+  scripts/gps_emulator.py
+  scripts/ekf.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

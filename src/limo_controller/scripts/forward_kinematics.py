@@ -162,7 +162,7 @@ class FKNode(Node):
         static_transform.transform.rotation.z = q[2]
         static_transform.transform.rotation.w = q[3]
         self.static_tf_bc.sendTransform(static_transform)
-        self.get_logger().info("Initial static transform from 'odom' to 'base_footprint' published.")
+        self.get_logger().info("Initial static transform from 'world' to 'base_footprint' published.")
         
     def imu_callback(self, msg: Imu):
         self.y_rate.omega = msg.angular_velocity.z
