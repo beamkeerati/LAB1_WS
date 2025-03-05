@@ -1,5 +1,10 @@
 # LAB1_WS – Mobile Robot Simulation
 
+- [Lab 1.1](#lab-11---mobile-robot-kinematics)
+- [Lab 1.2](#lab-12---path-tracking-controller)
+- [Lab 1.3](#lab-13---state-estimator)
+
+## Lab 1.1 - Mobile Robot Kinematics
 ## Prerequisites
 Ensure you have ROS 2 Humble installed. If rosdep is not initialized, it will be set up automatically.
 
@@ -111,3 +116,11 @@ The discrepancies in trajectory between the kinematic models arise because each 
 2. xacro parameters: The xacro file contains parameters such as wheelbase, track width, and other mechanical properties that define the robot's geometry. Small variations in these parameters can lead to different behaviors in the kinematic models. For example, the wheelbase length directly impacts how the robot turns, and tuning this value is important for accurate motion representation. Similarly, the yaw rate model depends heavily on how the robot's sensors and actuators are configured in the simulation.
 
 By carefully tuning these parameters in both the control algorithms and the xacro file, the discrepancies can be minimized ensuring that the models provide a more consistent trajectory across the different kinematic approaches. This process involves iteratively adjusting the values and testing them in both simulation (Gazebo) and real-world applications to achieve optimal performance.
+
+---
+
+## Lab 1.2 - Path Tracking Controller
+
+---
+
+## Lab 1.3 - State Estimator
