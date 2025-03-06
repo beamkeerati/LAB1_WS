@@ -55,7 +55,7 @@ The straight line appearing before the graph's movement represents idle time bef
 
 ---
 Plotjuggler comparison
-![Plotjuggler.png](/images/Ground_Truth_Error_Proof_Bi_Square_0.3_-0.4.png)
+![Plotjuggler.png](/images/1.1/Ground_Truth_Error_Proof_Bi_Square_0.3_-0.4.png)
 
 ---
 
@@ -65,11 +65,11 @@ The yaw rate and single-track results are close to the ground truth, while the d
 
 ---
 Bicycle mode circular
-![Bicycle_Circle.png](/images/Bi_Circle_0.3_-0.4.png)
+![Bicycle_Circle.png](/images/1.1/Bi_Circle_0.3_-0.4.png)
 
 ---
 Car mode circular
-![Car_Circle.png](/images/Car_Circle_0.3_-0.4.png)
+![Car_Circle.png](/images/1.1/Car_Circle_0.3_-0.4.png)
 
 ---
 
@@ -81,11 +81,11 @@ In car mode, with no slip, the square trajectory is generated more accurately th
 
 ---
 Bicycle mode square
-![Bicycle_Square.png](/images/Bi_Square_0.3_-0.4.png)
+![Bicycle_Square.png](/images/1.1/Bi_Square_0.3_-0.4.png)
 
 ---
 Car mode square
-![Car_Square.png](/images/Car_Square_0.3_-0.4.png)
+![Car_Square.png](/images/1.1/Car_Square_0.3_-0.4.png)
 
 ---
 
@@ -95,11 +95,11 @@ This trajectory retains the same fundamental characteristics as the previous one
 
 ---
 Bicycle mode wave
-![Bicycle_Wave.png](/images/Bi_Wave_0.3_-0.3.png)
+![Bicycle_Wave.png](/images/1.1/Bi_Wave_0.3_-0.3.png)
 
 ---
 Car mode wave
-![Car_Wave.png](/images/Car_Wave_0.3_-0.3.png)
+![Car_Wave.png](/images/1.1/Car_Wave_0.3_-0.3.png)
 
 ---
 
@@ -120,6 +120,15 @@ By carefully tuning these parameters in both the control algorithms and the xacr
 ---
 
 ## Lab 1.2 - Path Tracking Controller
+
+### PID Method
+![PID.png](/images/1.2/PID.png)
+
+### Pure pursuit Method
+
+### Stanley Method
+
+
 
 ---
 
