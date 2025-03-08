@@ -120,14 +120,53 @@ By carefully tuning these parameters in both the control algorithms and the xacr
 ---
 
 ## Lab 1.2 - Path Tracking Controller
+different controllers can be selected as such.
+```shell
+ros2 launch limo_bringup limo_bringup_1.2_pid.launch.py
+```
+```shell
+ros2 launch limo_bringup limo_bringup_1.2_pure_pursuit.launch.py
+```
+```shell
+ros2 launch limo_bringup limo_bringup_1.2_stanley.launch.py
+```
+
+Three out of four controllers were selected and developed. Here are the detailed results for each controller.
 
 ### PID Method
 ![PID.png](/images/1.2/PID.png)
 
+referring from [PID Control Method](https://thomasfermi.github.io/Algorithms-for-Automated-Driving/Control/PID.html), there are essentially three parameters that can be configured and tuned to match the path trajectory. Although the PID method is stated to be more suitable for throttle control rather than lateral control, we implemented it for steering to the best of our ability. Our experiment demonstrated that, even if not optimal, PID can still be a feasible method on a simpler track.
+
+each PID gains can be dynamically tuned as follow:
+
+get the current K values
+```shell
+ros2 param get /pid_node Kp
+ros2 param get /pid_node Ki
+ros2 param get /pid_node Kd
+```
+To set each K values (replace the number with your own desired value)
+```shell
+ros2 param set /pid_node Kp 15.0
+ros2 param set /pid_node Ki 2.0
+ros2 param set /pid_node Kd 0.5
+```
+
+other miscellaneous parameters can be configured if needed.
+```shell
+ros2 param list /pid_node 
+```
+
 ### Pure pursuit Method
+![Pure_Pursuit.png](/images/1.2/Pure_Pursuit.png)
+
+This is our most successful and ideal controller for lateral control so far. The results for the single-track model, yaw rate, and ground truth are very similar, while only the double-track model's path deviated.
+
+There are no dynamically configurable parameters in this method. The LIMO robot consistently follows the path while maintaining a set distance to the path at all times.
 
 ### Stanley Method
-
+![Stanley.png](/images/1.2/Stanley.png)
 
 
 ---
