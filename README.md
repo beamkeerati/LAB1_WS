@@ -144,8 +144,8 @@ $$
 
 where:
 
-- $ K_d, K_i, K_d $ are tuning parameters
-- $ e(t) $ is the cross track error
+- $K_d, K_i, K_d$ are tuning parameters
+- $e(t)$ is the cross track error
 
 referring from [PID Control Method](https://thomasfermi.github.io/Algorithms-for-Automated-Driving/Control/PID.html), there are essentially three parameters that can be configured and tuned to match the path trajectory. Although the PID method is stated to be more suitable for throttle control rather than lateral control, we implemented it for steering to the best of our ability. Our experiment demonstrated that, even if not optimal, PID can still be a feasible method on a simpler track.
 
@@ -271,9 +271,9 @@ $$
 
 where:
 
-- $ L $ is the wheelbase
-- $ \alpha $ is the angle between the vehicle's heading and the look-ahead vector
-- $ l_d $ is the look-ahead distance
+- $L$ is the wheelbase
+- $\alpha$ is the angle between the vehicle's heading and the look-ahead vector
+- $l_d$ is the look-ahead distance
 
 Our current controller for lateral control has proven to be the most successful and ideal approach so far. The results for the single-track model, yaw rate, and ground truth are nearly identical, while the double-track model shows some path deviation. This method does not include any dynamically configurable parameters, but the LIMO robot consistently follows the path while maintaining a constant distance from it.
 
@@ -373,16 +373,17 @@ $$
 ![Stanley.png](/images/1.2/Stanley.png)
 
 Formula: 
+
 $$
 \delta(t) = \theta_e(t) + \tan^{-1} \left( \frac{k e_{fa}(t)}{v_x(t)} \right)
 $$
 
 where:
 
-- $ \theta_e(t)  $ is the heading error
-- $ k $ is a gain parameter
-- $ e_{fa} $ is the cross-track error
-- $ v_x $ is the longitudinal velocity
+- $\theta_e(t)$ is the heading error
+- $k$ is a gain parameter
+- $e_{fa}$ is the cross-track error
+- $v_x$ is the longitudinal velocity
 
 
 This method exhibits the most overshooting among the controllers due to its nature of aggressively correcting heading angle errors. The Stanley controller works by minimizing both the cross-track error (the perpendicular distance to the path) and the heading error (the difference between the robot’s orientation and the desired path direction).
