@@ -45,6 +45,8 @@ ros2 launch limo_bringup limo_bringup_1.1.launch.py
 
 ## Results
 
+from [1.1 launch](/src/limo_bringup/launch/limo_bringup_1.1.launch.py) & [limo plot](/src/limo_results/scripts/limo_plot.py)
+
 From this point, we will discuss the results observed from different trajectories plotted by subscribing to each topics and plot them into matplotlib.
 
 Note 1: 
@@ -120,7 +122,27 @@ By carefully tuning these parameters in both the control algorithms and the xacr
 ---
 
 ## Lab 1.2 - Path Tracking Controller
+
+- [PID](#pid-method)
+- [Pure Pursuit](#pure-pursuit-method)
+- [Stanley](#stanley-method)
+
 different controllers can be selected as such.
+
+```shell
+ros2 launch limo_bringup limo_bringup_1.2.launch.py controller:=pid
+```
+
+```shell
+ros2 launch limo_bringup limo_bringup_1.2.launch.py controller:=pure_pursuit
+```
+
+```shell
+ros2 launch limo_bringup limo_bringup_1.2.launch.py controller:=stanley
+```
+
+**or** calling directly
+
 ```shell
 ros2 launch limo_bringup limo_bringup_1.2_pid.launch.py
 ```
@@ -133,7 +155,7 @@ ros2 launch limo_bringup limo_bringup_1.2_stanley.launch.py
 
 Three out of four controllers were selected and developed. Here are the detailed results for each controller.
 
-### PID Method
+## PID Method
 ![PID.png](/images/1.2/PID.png)
 
 Formula: 
@@ -260,7 +282,7 @@ steering_correction = np.clip(steering_correction, -max_steering_rad, max_steeri
 
 ---
 
-### Pure pursuit Method
+## Pure pursuit Method
 ![Pure_Pursuit.png](/images/1.2/Pure_Pursuit.png)
 
 Formula: 
@@ -369,7 +391,7 @@ $$
 
 ---
 
-### Stanley Method
+## Stanley Method
 ![Stanley.png](/images/1.2/Stanley.png)
 
 Formula: 
@@ -497,3 +519,35 @@ In evaluating the PID, Stanley, and Pure Pursuit controllers for trajectory trac
 ---
 
 ## Lab 1.3 - State Estimator
+
+- [Part 1](#lab-13-part-1)
+- [Part 2](#lab-13-part-2)
+
+choose one of the following controllers (pure pursuit recommended)
+
+```shell
+ros2 launch limo_bringup limo_bringup_1.3.launch.py controller:=pid
+```
+
+```shell
+ros2 launch limo_bringup limo_bringup_1.3.launch.py controller:=pure_pursuit
+```
+
+```shell
+ros2 launch limo_bringup limo_bringup_1.3.launch.py controller:=stanley
+```
+run the GPS emulator from [gps emulator](/src/limo_controller/scripts/gps_emulator.py)
+
+```shell
+ros2 run limo_controller gps_emulator.py
+```
+
+---
+
+## Lab 1.3 part 1
+
+from [EKF Localization](https://atsushisakai.github.io/PythonRobotics/modules/2_localization/extended_kalman_filter_localization_files/extended_kalman_filter_localization.html)
+
+---
+
+## Lab 1.3 part 2
