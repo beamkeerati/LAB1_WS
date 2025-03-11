@@ -137,8 +137,11 @@ Three out of four controllers were selected and developed. Here are the detailed
 ![PID.png](/images/1.2/PID.png)
 
 Formula: 
+
 $$
+
 \delta(t) = K_p e(t) + K-i \int e(t)dt + K_d \frac{de(t)}{dt}
+
 $$
 
 where:
@@ -263,8 +266,11 @@ steering_correction = np.clip(steering_correction, -max_steering_rad, max_steeri
 ![Pure_Pursuit.png](/images/1.2/Pure_Pursuit.png)
 
 Formula: 
+
 $$
+
 \delta(t) = \tan^{-1} \frac{2Lsin (\alpha(t))}{l_d}
+
 $$
 
 where:
@@ -371,7 +377,9 @@ $$
 
 Formula: 
 $$
+
 \delta(t) = \theta_e(t) + \tan^{-1} \left( \frac{k e_{fa}(t)}{v_x(t)} \right)
+
 $$
 
 where:
@@ -442,7 +450,9 @@ error_front_axle = error_x * (-math.sin(yaw)) + error_y * math.cos(yaw)
 - The cross-track error is projected perpendicularly onto the vehicle's local heading using
 
 $$
+
 CTE = error_x \cdot (-sin(yaw)) + error_y \cdot cos(yaw)
+
 $$
 
 - This ensures that positive error means the vehicle is to the right of the path, and negative error means it's to the left.
@@ -476,7 +486,9 @@ delta = theta_e + theta_d
 - The steering angle consists of:
 
 $$
+
 \delta = \theta_e + tan^{-1} (\frac{k \cdot CTE}{speed})
+
 $$
 
 - `theta_d` is the correction based on cross-track error, scaled by self.k (a tuning parameter).
