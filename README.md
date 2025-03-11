@@ -546,7 +546,87 @@ ros2 run limo_controller gps_emulator.py
 
 ## Lab 1.3 part 1
 
-from [EKF Localization](https://atsushisakai.github.io/PythonRobotics/modules/2_localization/extended_kalman_filter_localization_files/extended_kalman_filter_localization.html)
+from [EKF Localization](https://atsushisakai.github.io/PythonRobotics/modules/2_localization/extended_kalman_filter_localization_files/extended_kalman_filter_localization.html) document, [gps emulator](/src/limo_controller/scripts/gps_emulator.py) & [gps plot](/src/limo_results/scripts/limo_plot_gps.py) 
+
+![gps_emulator.png](/images/1.3/GPS_Emulator.png)
+
+We can simulate GPS position by inducing noise to the ground truth path.
+
+---
+
+from [EKF](/src/limo_controller/scripts/ekf.py) the adjustable parameters are the Process Noise Covariance (matrix Q) and Measurement Noise Covariance (matrix R)
+
+**Process Noise Covariance (Q)**
+- Represents the uncertainty in the system's motion model.
+- Accounts for errors from unmodeled dynamics, system imperfections, or external disturbances.
+
+from this code;
+```py
+proc_noise = np.array(self.get_parameter('process_noise').value) ** 2  # square to variance
+self.Q = np.diag(proc_noise)
+```
+the SD value got squared resulted in **variance** which then got converted into matrix.
+
+example Q matrix:
+```py
+Q = |  1.0      0       0       0  |
+    |  0      1.0       0       0  |
+    |  0       0   (1°)^2    0  |
+    |  0       0       0     1.0  |
+```
+
+- Large values → higher uncertainty in prediction.
+- Small values → more confidence in the motion model.
+
+---
+
+**Measurement Noise Covariance (R)**
+
+- Represents uncertainty in sensor measurements.
+- Squaring ensures values represent variance.
+- Each sensor has its own R matrix, defined separately as shown:
+
+```python
+double_noise = np.array(self.get_parameter('R_double_track').value) ** 2
+single_noise = np.array(self.get_parameter('R_single_track').value) ** 2
+yaw_noise    = float(self.get_parameter('R_yaw_rate').value) ** 2
+gps_noise    = np.array(self.get_parameter('R_gps').value) ** 2
+```
+
+example R_Double matrix:
+
+```py
+R_double = | (10m)^2    0         0     |
+           |    0   (10m)^2       0     |
+           |    0       0    (500°)^2  |
+
+R_single = same structure as R_double
+
+R_yaw = | (1°)^2 |
+
+R_gps = | (1m)^2    0   |
+        |   0    (1m)^2 |
+```
+
+### Key Takeaways:
+- Q (Process Noise): Controls how much the system trusts its motion model.
+- R (Measurement Noise): Controls how much the system trusts sensor readings.
+- Tuning: If the filter is too slow to update, increase Q or decrease R; if it's too noisy, decrease Q or increase R.
+
+## Result
+
+- Green line = Path
+- Green arrow = Ground Truth
+- Blue arrow = Yaw rate
+- purple arrow = Single Track
+
+![noise_ekf.png](/images/1.3/Noise_EKF.png)
+
+With high Q value we can clearly see that the filtered odom became very noisy (black arrow)
+
+![emulator_activated.png](/images/1.3/Emulator_activated.png)
+
+When the GPS was activated, the EKF odometry adjusted to a more accurate position, as shown. This updated position can then serve as the new reference, replacing the Ground Truth, which is unavailable in real-world scenarios.
 
 ---
 

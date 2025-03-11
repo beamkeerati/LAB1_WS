@@ -37,8 +37,8 @@ class LimoPlotNode(Node):
     def plot_callback(self):
         """Updates the plot in real-time using a ROS 2 timer."""
         self.ax.clear()
-        self.ax.plot(self.GT_x_data, self.GT_y_data, 'go-', label='Ground Truth', markersize=5)  # Green
-        self.ax.plot(self.GPS_x_data, self.GPS_y_data, 'bo-', label='GPS', markersize=5)  # Blue
+        self.ax.plot(self.GT_x_data, self.GT_y_data, 'go-', label='Ground Truth', markersize=5)  # Green line
+        self.ax.scatter(self.GPS_x_data, self.GPS_y_data, c='b', label='GPS', s=10)  # Blue dots only
         self.ax.set_xlabel('X Position')
         self.ax.set_ylabel('Y Position')
         self.ax.set_title('Real-time Position Plot')
