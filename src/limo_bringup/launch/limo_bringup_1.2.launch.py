@@ -74,44 +74,11 @@ def generate_launch_description():
         output="screen"
     )
 
-    # Node for Pure Pursuit controller, with condition
-    pure_pursuit_gps = Node(
-        package="limo_controller",
-        executable="pure_pursuit_gps.py",
-        name="pure_pursuit_gps_node",
-        output="screen",
-        condition=IfCondition(PythonExpression(["'", LaunchConfiguration('controller'), "' == 'pure_pursuit_gps'"]))
-    )
-    
-    # Node for Stanley controller, with condition
-    stanley_gps = Node(
-        package="limo_controller",
-        executable="stanley_gps.py",
-        name="stanley_node_gps",
-        output="screen",
-        condition=IfCondition(PythonExpression(["'", LaunchConfiguration('controller'), "' == 'stanley_gps'"]))
-    )
-
-    # Node for PID controller (to be delayed), with condition
-    pid_gps = Node(
-        package="limo_controller",
-        executable="pid_gps.py",
-        name="pid_node_gps",
-        output="screen"
-    )
-
     # TimerAction to delay the PID node launch by 10 seconds.
     delayed_pid = TimerAction(
         period=10.0,
         actions=[pid],
         condition=IfCondition(PythonExpression(["'", LaunchConfiguration('controller'), "' == 'pid'"]))
-    )
-
-    # TimerAction to delay the PID node launch by 10 seconds.
-    delayed_pid_gps = TimerAction(
-        period=10.0,
-        actions=[pid_gps],
-        condition=IfCondition(PythonExpression(["'", LaunchConfiguration('controller'), "' == 'pid_gps'"]))
     )
 
     # Create the launch description and populate it with the actions.
@@ -124,9 +91,6 @@ def generate_launch_description():
     ld.add_action(delayed_pid)
     ld.add_action(stanley)
     ld.add_action(pure_pursuit)
-    ld.add_action(delayed_pid_gps)
-    ld.add_action(stanley_gps)
-    ld.add_action(pure_pursuit_gps)
     # Optionally add rqt_robot_steering if needed:
     # ld.add_action(rqt_robot_steering)
 

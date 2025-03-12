@@ -27,7 +27,7 @@ class StanleyNode(Node):
         self.mode = self.get_parameter("mode").get_parameter_value().string_value
         
         # Set up subscriber and timer
-        self.odom_sub = self.create_subscription(Odometry, '/filtered/odom', self.odom_callback, 10)
+        self.odom_sub = self.create_subscription(Odometry, '/odometry/ground_truth', self.odom_callback, 10)
         # Timer callback now runs the Stanley controller periodically
         self.create_timer(0.01, self.timer_callback)
         self.robot_odom = Odometry()

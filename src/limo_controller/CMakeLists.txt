@@ -31,7 +31,6 @@ install(PROGRAMS
   scripts/inverse_kinematics.py
   scripts/forward_kinematics.py
   scripts/pure_pursuit.py
-  scripts/pure_pursuit_gps.py
   scripts/stanley.py
   scripts/pid.py
   scripts/gps_emulator.py
