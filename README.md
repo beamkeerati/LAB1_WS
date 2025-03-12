@@ -626,8 +626,13 @@ With high Q value we can clearly see that the filtered odom became very noisy (b
 
 ![emulator_activated.png](/images/1.3/Emulator_activated.png)
 
-When the GPS was activated, the EKF odometry adjusted to a more accurate position, as shown. This updated position can then serve as the new reference, replacing the Ground Truth, which is unavailable in real-world scenarios.
+When the GPS was activated, the EKF odometry adjusted to a more accurate position, as shown in the picture above. This updated position can then serve as the new reference, replacing the Ground Truth, which is unavailable in real-world scenarios.
+
+![ekf_path.png](/images/1.3/EKF_Path.png)
+
+Plotting with the graph again, shows that the filtered EKF value matches the same trajectory as the original Ground Truth.
+
 
 ---
 
-## Lab 1.3 part 2
+

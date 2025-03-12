@@ -16,9 +16,13 @@ class LimoPlotNode(Node):
         self.GPS_x_data = deque(maxlen=2000) 
         self.GPS_y_data = deque(maxlen=2000) 
 
+        self.EKF_x_data = deque(maxlen=2000) 
+        self.EKF_y_data = deque(maxlen=2000) 
+
         #--------------------------- Subscription ---------------------------#
         self.create_subscription(Odometry, '/odometry/ground_truth', self.odom_gt_callback, 10)
         self.create_subscription(Odometry, '/gps/odom', self.odom_gps_callback, 10)
+        self.create_subscription(Odometry, '/filtered/odom', self.odom_ekf_callback, 10)
 
         #--------------------------- Timer for Plotting ---------------------------#
         self.create_timer(0.1, self.plot_callback)  # Update plot every 0.1s
@@ -34,10 +38,15 @@ class LimoPlotNode(Node):
         self.GPS_x_data.append(msg.pose.pose.position.x)
         self.GPS_y_data.append(msg.pose.pose.position.y)
 
+    def odom_ekf_callback(self, msg: Odometry):
+        self.EKF_x_data.append(msg.pose.pose.position.x)
+        self.EKF_y_data.append(msg.pose.pose.position.y)
+
     def plot_callback(self):
         """Updates the plot in real-time using a ROS 2 timer."""
         self.ax.clear()
         self.ax.plot(self.GT_x_data, self.GT_y_data, 'go-', label='Ground Truth', markersize=5)  # Green line
+        self.ax.plot(self.EKF_x_data, self.EKF_y_data, 'ko-', label='EKF', markersize=5)
         self.ax.scatter(self.GPS_x_data, self.GPS_y_data, c='b', label='GPS', s=10)  # Blue dots only
         self.ax.set_xlabel('X Position')
         self.ax.set_ylabel('Y Position')
