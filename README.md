@@ -632,7 +632,6 @@ When the GPS was activated, the EKF odometry adjusted to a more accurate positio
 
 Plotting with the graph again, shows that the filtered EKF value matches the same trajectory as the original Ground Truth.
 
-
 ---
 
-
+## Lab 1.3 part 2
