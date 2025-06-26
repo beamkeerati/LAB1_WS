@@ -7,6 +7,9 @@
   <maintainer email="1561155732@qq.com">q</maintainer>
   <license>TODO: License declaration</license>
 
+  <depend condition="$GZ_VERSION == '' or $GZ_VERSION == fortress">ignition-gazebo6</depend>
+  <depend condition="$GZ_VERSION == '' or $GZ_VERSION == fortress">ignition-plugin</depend>
+
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake</buildtool_depend>
   <exec_depend>joint_state_publisher</exec_depend>
@@ -24,6 +27,13 @@
   <depend>ros_gz_sim</depend>
   <depend>sensor_msgs</depend>
   <depend>tf2</depend>
+  
+  <!-- gz_ros2_control dependencies -->
+  <depend>gz_ros2_control</depend>
+  <depend>controller_manager</depend>
+  <depend>joint_state_broadcaster</depend>
+  <depend>position_controllers</depend>
+  <depend>velocity_controllers</depend>
   
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
