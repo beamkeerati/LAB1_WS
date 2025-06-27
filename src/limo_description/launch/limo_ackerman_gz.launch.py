@@ -11,19 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.actions import RegisterEventHandler
+from launch.actions import AppendEnvironmentVariable
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
-
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
+from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
+    
     # Launch Arguments
     use_sim_time = LaunchConfiguration('use_sim_time', default=True)
     robot_name = LaunchConfiguration('robot_name', default='limo')
@@ -41,6 +43,19 @@ def generate_launch_description():
         ]
     )
     robot_description = {'robot_description': robot_description_content}
+
+    set_env_vars_resources = AppendEnvironmentVariable(
+            'IGN_GAZEBO_RESOURCE_PATH',
+            os.path.join(get_package_share_directory('limo_description'),
+                         'models'))
+
+    robot_world = PathJoinSubstitution(
+        [
+            FindPackageShare('limo_description'),
+            'worlds',
+            'basic_gz.world',
+        ]
+    )
     
     # Controller configuration
     robot_controllers = PathJoinSubstitution(
@@ -102,6 +117,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        set_env_vars_resources,
         # Launch Arguments
         DeclareLaunchArgument(
             'use_sim_time',
@@ -113,7 +129,7 @@ def generate_launch_description():
             description='Name of the robot in simulation'),
         DeclareLaunchArgument(
             'world',
-            default_value='empty.sdf',
+            default_value=robot_world,
             description='Gazebo world file'),
             
         # Launch Gazebo environment
