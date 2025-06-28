@@ -108,11 +108,16 @@ def generate_launch_description():
         parameters=[{'use_sim_time': use_sim_time}]
     )
 
-    # Bridge for /clock topic
+    # Bridge for sensor topics (Clock, IMU, Odometry, TF) - Direct argument approach
     bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
-        arguments=['/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock'],
+        arguments=[
+            '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
+            'imu@sensor_msgs/msg/Imu[gz.msgs.IMU',
+            'odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
+            '/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V'
+        ],
         output='screen'
     )
 
@@ -140,7 +145,7 @@ def generate_launch_description():
                                        'gz_sim.launch.py'])]),
             launch_arguments=[('gz_args', ['-r -v 4 ', world])]),
         
-        # Clock bridge
+        # Bridge for sensors
         bridge,
         
         # Robot state publisher

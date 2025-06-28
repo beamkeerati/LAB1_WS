@@ -1,29 +1,29 @@
 <?xml version="1.0"?>
 <sdf version="1.6">
   <world name="default">
-    
+
     <!-- Essential plugins for Gazebo Fortress -->
     <plugin
       filename="gz-sim-physics-system"
       name="gz::sim::systems::Physics">
     </plugin>
-    
+
     <plugin
       filename="gz-sim-user-commands-system"
       name="gz::sim::systems::UserCommands">
     </plugin>
-    
+
     <plugin
       filename="gz-sim-scene-broadcaster-system"
       name="gz::sim::systems::SceneBroadcaster">
     </plugin>
-    
+
     <plugin
       filename="gz-sim-sensors-system"
       name="gz::sim::systems::Sensors">
       <render_engine>ogre2</render_engine>
     </plugin>
-    
+
     <plugin
       filename="gz-sim-imu-system"
       name="gz::sim::systems::Imu">
@@ -42,17 +42,17 @@
       </uri>
     </include> -->
 
-    <include>
+    <!-- <include>
       <uri>model://ground_plane_invisible</uri>
       <friction>
         <ode>
-          <mu>2.5</mu>          <!-- Increase friction -->
+          <mu>2.5</mu>         
           <mu2>2.5</mu2>
           <slip1>0.0</slip1>
           <slip2>0.0</slip2>
         </ode>
       </friction>
-    </include>
+    </include> -->
 
     <!-- Sun -->
     <include>
@@ -62,32 +62,55 @@
     </include>
 
     <include>
-        <uri>
-          model://circuit
-        </uri>
+      <uri>
+        model://circuit
+      </uri>
     </include>
 
-    <!-- Physics settings -->
+    <!-- Realistic Physics Settings for Real-World Synchronization -->
     <physics type="ode">
-      <real_time_update_rate>1000.0</real_time_update_rate>
-      <max_step_size>0.001</max_step_size>
-      <real_time_factor>1</real_time_factor>
+      <!-- Real-time synchronization settings -->
+      <real_time_update_rate>1000.0</real_time_update_rate>  <!-- 1000 Hz update rate -->
+      <max_step_size>0.001</max_step_size>                   <!-- 1ms timestep for stability -->
+      <real_time_factor>1.0</real_time_factor>               <!-- Exact real-time sync -->
+
       <ode>
         <solver>
-          <type>quick</type>
-          <iters>150</iters>
-          <precon_iters>0</precon_iters>
-          <sor>1.400000</sor>
+          <type>world</type>                    <!-- More accurate than "quick" -->
+          <iters>200</iters>                    <!-- Increased for better accuracy -->
+          <precon_iters>0</precon_iters>        <!-- Keep at 0 for performance -->
+          <sor>1.3</sor>                        <!-- Optimized relaxation parameter -->
           <use_dynamic_moi_rescaling>1</use_dynamic_moi_rescaling>
         </solver>
+
         <constraints>
-          <cfm>0.00001</cfm>
-          <erp>0.2</erp>
-          <contact_max_correcting_vel>2000.000000</contact_max_correcting_vel>
-          <contact_surface_layer>0.01000</contact_surface_layer>
+          <cfm>0.0001</cfm>                     <!-- Less stiff, more realistic -->
+          <erp>0.8</erp>                        <!-- Better constraint correction -->
+          <contact_max_correcting_vel>100.0</contact_max_correcting_vel>  <!-- More realistic -->
+          <contact_surface_layer>0.001</contact_surface_layer>            <!-- Thinner layer -->
         </constraints>
       </ode>
     </physics>
+
+    <!-- Enhanced ground plane with realistic friction -->
+    <include>
+      <uri>model://ground_plane_invisible</uri>
+      <friction>
+        <ode>
+          <mu>1.0</mu>          <!-- Realistic tire-concrete friction -->
+          <mu2>1.0</mu2>        <!-- Same for both directions -->
+          <slip1>0.01</slip1>   <!-- Small amount of realistic slip -->
+          <slip2>0.01</slip2>
+          <fdir1>0 0 0</fdir1>  <!-- Friction direction -->
+        </ode>
+      </friction>
+    </include>
+
+    <!-- Add realistic gravity (Earth standard) -->
+    <gravity>0 0 -9.81</gravity>
+
+    <!-- Optional: Add magnetic field for compass sensors -->
+    <magnetic_field>6e-06 2.3e-05 -4.2e-05</magnetic_field>
 
     <!-- Camera view -->
     <gui fullscreen='0'>

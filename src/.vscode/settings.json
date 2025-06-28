@@ -1,3 +1,4 @@
 {
-    "ros.distro": "humble"
+    "ros.distro": "humble",
+    "cmake.sourceDirectory": "/home/beamkeerati/FRA532_MobileRobot/LAB1_WS/src/limo_controller"
 }
