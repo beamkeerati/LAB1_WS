@@ -1,129 +1,86 @@
 <?xml version="1.0"?>
+<robot name="limo_ackerman"
+  xmlns:xacro="http://ros.org/wiki/xacro">
 
-<robot name="limo_gazebo" xmlns:xacro="http://ros.org/wiki/xacro">
+  <!-- Include your Gazebo-specific macros and definitions -->
+  <!-- In ROS 2, you might replace $(find ...) with something like "xacro:include filename="$(find-pkg-share limo_description)/urdf/limo_gazebo.gazebo" -->
+  <xacro:include filename="$(find limo_description)/urdf/classic/limo_gazebo.gazebo" />
 
-    <xacro:macro name="limo_wheel_transmission" params="wheel_prefix">
-        <transmission name="${wheel_prefix}_wheel_trans" type="SimpleTransmission">
-            <type>transmission_interface/SimpleTransmission</type>
-            <actuator name="${wheel_prefix}_wheel_motor">
-                <hardwareInterface>hardware_interface/VelocityJointInterface</hardwareInterface>
-                <!-- <mechanicalReduction>1</mechanicalReduction> -->
-            </actuator>
-            <joint name="${wheel_prefix}_wheel">
-                <hardwareInterface>hardware_interface/VelocityJointInterface</hardwareInterface>
-            </joint>
-        </transmission>
-    </xacro:macro>
+  <!-- Actuator configurations -->
+  <xacro:limo_wheel_transmission wheel_prefix="front_right" />
+  <xacro:limo_wheel_transmission wheel_prefix="front_left" />
+  <xacro:limo_wheel_transmission wheel_prefix="rear_left" />
+  <xacro:limo_wheel_transmission wheel_prefix="rear_right" />
+  <xacro:limo_steering_hinge_transmission wheel_prefix="left_steering_hinge" />
+  <xacro:limo_steering_hinge_transmission wheel_prefix="right_steering_hinge" />
 
-    <xacro:macro name="limo_steering_hinge_transmission" params="wheel_prefix">
-        <transmission name="${wheel_prefix}_wheel_trans" type="SimpleTransmission">
-            <type>transmission_interface/SimpleTransmission</type>
-            <actuator name="${wheel_prefix}_wheel_motor">
-                <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
-                <!-- <mechanicalReduction>1</mechanicalReduction> -->
-            </actuator>
-            <joint name="${wheel_prefix}_wheel">
-                <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
-            </joint>
-        </transmission>
-    </xacro:macro>
+  <!-- Controller configurations (sensors) -->
+  <xacro:gazebo_laser frame_prefix="laser" />
+  <xacro:gazebo_depth_camera frame_prefix="depth_camera" />
+  <xacro:gazebo_imu frame_prefix="imu" />
 
-    <xacro:macro name="gazebo_laser" params="frame_prefix">
-        <gazebo reference="${frame_prefix}_link">
-            <sensor type="ray" name="laser_sensor">
-              <pose>0 0 0 0 0 0</pose>
-              <visualize>false</visualize>
-              <update_rate>8</update_rate>
-              <ray>
-                <scan>
-                  <horizontal>
-                    <samples>720</samples>
-                    <resolution>1</resolution>
-                    <min_angle>-2.09439504</min_angle>
-                    <max_angle>2.09439504</max_angle>
-                  </horizontal>
-                </scan>
-                <range>
-                  <min>0.05</min>
-                  <max>8.0</max>
-                  <resolution>0.01</resolution>
-                </range>
-                <noise>
-                  <type>gaussian</type>
-                  <mean>0.0</mean>
-                  <stddev>0.01</stddev>
-                </noise>
-              </ray>
-              <plugin name="gazebo_ros_laser_sensor" filename="libgazebo_ros_ray_sensor.so">
-              <ros>
-                <remapping>~/out:=scan</remapping>
-              </ros>
-                <topicName>/limo/scan</topicName>
-                <frameName>laser_link</frameName>
-              </plugin>
-            </sensor>
-          </gazebo>
-    </xacro:macro>
+  <!-- Global Gazebo friction parameters -->
+  <gazebo>
+    <mu1 value="10"/>
+    <mu2 value="10"/>
+    <kp value="100000.0"/>
+    <kd value="1.0"/>
+    <fdir1 value="1 0 0"/>
+    <minDepth value="0.001"/>
+    <maxContacts value="64"/>
+  </gazebo>
 
-    <!-- FIXED: Updated depth camera plugin from deprecated openni_kinect to newer depth camera plugin -->
-    <xacro:macro name="gazebo_depth_camera" params="frame_prefix">
-        <gazebo reference="${frame_prefix}_link">
-          <sensor name="sensor_camera" type="depth">
-            <pose>0.0 0.0 0.0 0.0 0.0 0.0</pose>
-            <always_on>true</always_on>
-            <visualize>true</visualize>
-            <update_rate>10.0</update_rate>
-            <camera name="head">
-              <horizontal_fov>1.3962634</horizontal_fov>
-              <image>
-                  <width>640</width>
-                  <height>480</height>
-                  <format>R8G8B8</format>
-              </image>
-              <clip>
-                  <near>0.02</near>
-                  <far>300</far>
-              </clip>
-            </camera>
+  <!-- Plugins -->
+  <gazebo>
+    <!-- In ROS 2, the plugin for ros2_control is typically "libgazebo_ros2_control.so" -->
+    <plugin name="gazebo_ros2_control" filename="libgazebo_ros2_control.so">
+      <!-- <robotNamespace>$(arg robot_namespace)</robotNamespace> -->
+      <parameters>$(find limo_description)/config/limo_controller.yaml</parameters>
 
-            <!-- UPDATED: Using the newer depth camera plugin -->
-            <plugin name="gazebo_ros_depth_camera_sensor" filename="libgazebo_ros_depth_camera.so">
-              <ros>
-                <remapping>color/image_raw:=/limo/color/image_raw</remapping>
-                <remapping>color/camera_info:=/limo/color/camera_info</remapping>
-                <remapping>depth/image_raw:=/limo/depth/image_raw</remapping>
-                <remapping>depth/camera_info:=/limo/depth/camera_info</remapping>
-                <remapping>points:=/limo/depth/points</remapping>
-              </ros>
-              <camera_name>depth_camera</camera_name>
-              <frame_name>depth_link</frame_name>
-              <hack_baseline>0.07</hack_baseline>
-              <min_depth>0.001</min_depth>
-              <max_depth>300.0</max_depth>
-            </plugin>
-        </sensor>
-          </gazebo>
-    </xacro:macro>
+    </plugin>
 
-    <xacro:macro name="gazebo_imu" params="frame_prefix">
-      <gazebo reference="${frame_prefix}_link">
-        <gravity>true</gravity>
-        <sensor name="imu_sensor" type="imu">
-          <always_on>true</always_on>
-          <update_rate>100</update_rate>
-          <visualize>true</visualize>
-          <topic>__default_topic__</topic>
-          <plugin filename="libgazebo_ros_imu_sensor.so" name="imu_plugin">
-            <topicName>/limo/imu</topicName>
-            <bodyName>${frame_prefix}_link</bodyName>
-            <updateRateHZ>100.0</updateRateHZ>
-            <gaussianNoise>0.001</gaussianNoise>
-            <xyzOffset>0 0 0</xyzOffset>
-            <rpyOffset>0 0 0</rpyOffset>
-            <frameName>imu_link</frameName>
-          </plugin>
-          <pose>0 0 0 0 0 0</pose>
-        </sensor>
-      </gazebo>
-  </xacro:macro>
+    <plugin name="ground_truth_plugin" filename="libgazebo_ros_p3d.so">
+      <ros>
+        <!-- The topic name where the position will be published -->
+        <remapping>odom:=/odometry/ground_truth</remapping>
+      </ros>
+      <frameName>world</frameName>
+      <!-- Replace with your robot's main link -->
+      <body_name>base_footprint</body_name>
+      <!-- Update rate in Hz -->
+      <updateRate>100.0</updateRate>
+      <!-- <xyz_offset>9.073496746393584 0 0</xyz_offset>
+            <rpy_offset>0 0 1.5700039414375448</rpy_offset> -->
+    </plugin>
+    <!--
+    The following plugin (libgazebo_ros_ackerman.so) doesn't exist in standard
+    ROS 2 Humble. If you have a custom plugin providing Ackermann steering for ROS 2,
+    replace "libgazebo_ros_ackerman.so" with the correct library filename.
+    Otherwise, comment it out or remove it.
+    -->
+    <!--
+    <plugin name="four_diff_controller" filename="libgazebo_ros_ackerman.so">
+      <updateRate>100.0</updateRate>
+      <robotNamespace>$(arg robot_namespace)</robotNamespace>
+      <leftFrontJoint>front_left_wheel</leftFrontJoint>
+      <rightFrontJoint>front_right_wheel</rightFrontJoint>
+      <leftRearJoint>rear_left_wheel</leftRearJoint>
+      <rightRearJoint>rear_right_wheel</rightRearJoint>
+      <leftHingeJoint>left_steering_hinge_wheel</leftHingeJoint>
+      <rightHingeJoint>right_steering_hinge_wheel</rightHingeJoint>
+      <wheelSeparation>0.172</wheelSeparation>
+      <wheelDiameter>0.09</wheelDiameter>
+      <robotBaseFrame>base_footprint</robotBaseFrame>
+      <commandTopic>cmd_vel</commandTopic>
+      <torque>50</torque>
+      <broadcastTF>true</broadcastTF>
+      <odometryTopic>odom</odometryTopic>
+      <odometryFrame>odom</odometryFrame>
+      <covariance_x>0.000100</covariance_x>
+      <covariance_y>0.000100</covariance_y>
+      <covariance_yaw>0.010000</covariance_yaw>
+    </plugin>
+    -->
+  </gazebo>
+
 </robot>
