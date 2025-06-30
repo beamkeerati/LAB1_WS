@@ -6,7 +6,7 @@
     <xacro:arg name="robot_namespace" default="/" />
     <xacro:include filename="$(find limo_description)/urdf/classic/limo_xacro.xacro" />
     <xacro:include filename="$(find limo_description)/urdf/classic/limo_steering_hinge.xacro" />
-    <xacro:include filename="$(find limo_description)/urdf/classic/limo_ackerman.gazebo" />
+    <xacro:include filename="$(find limo_description)/urdf/classic/limo_gazebo.gazebo" />
 
     <!-- Variables -->
     <xacro:property name="M_PI" value="3.14159"/>
@@ -73,6 +73,11 @@
         <origin xyz="0.0 0 -0.1" rpy="0 0 0"/>
     </xacro:limo_imu>
 
+    <!-- Add Gazebo sensor plugins -->
+    <xacro:gazebo_laser frame_prefix="laser"/>
+    <xacro:gazebo_depth_camera frame_prefix="depth_camera"/>
+    <xacro:gazebo_imu frame_prefix="imu"/>
+
     <xacro:limo_left_steering_hinge parent_prefix="base_link" wheel_prefix="left_steering_hinge">
         <origin xyz="${wheelbase/2} ${track/2} ${wheel_vertical_offset}" rpy="0 0  0" />
     </xacro:limo_left_steering_hinge>
@@ -136,8 +141,8 @@
         <axis xyz="0 -1 0"/>
     </joint>
 
-    <!-- FIXED: Changed plugin name from gz_ros2_control/GazeboSimSystem to gazebo_ros2_control/GazeboSystem -->
-    <ros2_control name="GazeboSimSystem" type="system">
+    <!-- ros2_control block -->
+    <ros2_control name="GazeboSystem" type="system">
         <hardware>
             <plugin>gazebo_ros2_control/GazeboSystem</plugin>
         </hardware>
@@ -177,6 +182,13 @@
         </joint>
     </ros2_control>
 
+    <!-- Gazebo ros2_control plugin -->
+    <gazebo>
+        <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">
+            <parameters>$(find limo_description)/config/limo_controller.yaml</parameters>
+        </plugin>
+    </gazebo>
+
     <gazebo reference="base_link">
         <minDepth>0.001</minDepth>
         <kp value="10000000.0"/>
@@ -196,6 +208,22 @@
         <mu2>1.0</mu2>
         <minDepth>0.001</minDepth>
         <kp value="1000000.0"/>
+        <kd value="1.0"/>
+    </gazebo>
+
+    <gazebo reference="rear_left_wheel_link">
+        <mu1>1.0</mu1>
+        <mu2>1.0</mu2>
+        <minDepth>0.001</minDepth>
+        <kp value="10000000.0"/>
+        <kd value="1.0"/>
+    </gazebo>
+
+    <gazebo reference="rear_right_wheel_link">
+        <mu1>1.0</mu1>
+        <mu2>1.0</mu2>
+        <minDepth>0.001</minDepth>
+        <kp value="10000000.0"/>
         <kd value="1.0"/>
     </gazebo>
 

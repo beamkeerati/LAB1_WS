@@ -1,11 +1,12 @@
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+from launch_ros.parameter_descriptions import ParameterValue  # Added this import
 from ament_index_python.packages import get_package_prefix
 
 def generate_launch_description():
@@ -15,7 +16,7 @@ def generate_launch_description():
     package_name = 'limo_description'
     robot_name_in_model = 'limo_description'
     rviz_config_file_path = 'rviz/lab1.rviz'
-    urdf_file_path = 'urdf/limo_ackerman.xacro'
+    urdf_file_path = 'urdf/classic/limo_ackerman.xacro'
     # world_file = 'l4rralde_gym.world'
     world_file = 'basic.world'
 
@@ -110,7 +111,7 @@ def generate_launch_description():
         package='robot_state_publisher',
         executable='robot_state_publisher',
         parameters=[{
-            'robot_description': Command(['xacro ', urdf_model]),
+            'robot_description': ParameterValue(Command(['xacro ', urdf_model]), value_type=str),
             'use_sim_time': use_sim_time
         }]
     )
@@ -165,19 +166,36 @@ def generate_launch_description():
     
     # We add teh gazebo model path to be able to us the package: in XACROS and not the file:
     
-    load_joint_state_publisher = ExecuteProcess(
-        cmd=['ros2', 'control', 'load_controller', '--set-state', 'active', 'joint_state_broadcaster'],
-        output='screen'
+    # Add delay before loading controllers
+    
+    load_joint_state_publisher = TimerAction(
+        period=10.0,  # Wait 10 seconds after Gazebo starts
+        actions=[
+            ExecuteProcess(
+                cmd=['ros2', 'control', 'load_controller', '--set-state', 'active', 'joint_state_broadcaster'],
+                output='screen'
+            )
+        ]
     )
     
-    load_joint_velocity_controller = ExecuteProcess(
-        cmd=['ros2', 'control', 'load_controller', '--set-state', 'active', 'velocity_controller'],
-        output='screen'
+    load_joint_velocity_controller = TimerAction(
+        period=12.0,  # Wait 12 seconds
+        actions=[
+            ExecuteProcess(
+                cmd=['ros2', 'control', 'load_controller', '--set-state', 'active', 'velocity_controller'],
+                output='screen'
+            )
+        ]
     )
 
-    load_joint_steering_controller = ExecuteProcess(
-        cmd=['ros2', 'control', 'load_controller', '--set-state', 'active', 'steering_controller'],
-        output='screen'
+    load_joint_steering_controller = TimerAction(
+        period=14.0,  # Wait 14 seconds
+        actions=[
+            ExecuteProcess(
+                cmd=['ros2', 'control', 'load_controller', '--set-state', 'active', 'steering_controller'],
+                output='screen'
+            )
+        ]
     )
 
     
