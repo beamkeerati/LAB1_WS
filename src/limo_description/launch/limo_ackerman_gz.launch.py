@@ -66,6 +66,15 @@ def generate_launch_description():
         ]
     )
 
+    # Bridge configuration file path
+    bridge_config_file = PathJoinSubstitution(
+        [
+            FindPackageShare('limo_description'),
+            'config',
+            'limo_bridge.yaml',
+        ]
+    )
+
     # Robot State Publisher
     node_robot_state_publisher = Node(
         package='robot_state_publisher',
@@ -108,16 +117,13 @@ def generate_launch_description():
         parameters=[{'use_sim_time': use_sim_time}]
     )
 
-    # Bridge for sensor topics (Clock, IMU, Odometry, TF) - Direct argument approach
+    # Bridge for sensor topics - Following README approach
+    # Based on: ros2 run ros_gz_bridge parameter_bridge --ros-args -p config_file:=path/to/config.yaml
     bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
-        arguments=[
-            '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
-            'imu@sensor_msgs/msg/Imu[gz.msgs.IMU',
-            'odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
-            '/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V'
-        ],
+        name='limo_bridge',
+        parameters=[{'config_file': bridge_config_file}],
         output='screen'
     )
 
