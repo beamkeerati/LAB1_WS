@@ -204,9 +204,6 @@ def generate_launch_description():
     gazebo_plugins_name_path_install_dir = get_package_prefix(
         gazebo_plugins_name)
 
-    gazebo_plugins_name = "gazebo_plugins"
-    gazebo_plugins_name_path_install_dir = get_package_prefix(
-        gazebo_plugins_name)
     
     description_package_name = "limo_description"
     install_dir = get_package_prefix(description_package_name)

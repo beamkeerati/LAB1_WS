@@ -17,24 +17,24 @@ def generate_launch_description():
     # Description launch
     limo_description = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_limo_description, 'launch','ign', 'limo_ackerman_gz.launch.py')
+            os.path.join(pkg_limo_description, 'launch','ign', 'limo_ackerman_gz_path.launch.py')
         )
     )
     
-    #
-    rqt_robot_steering = ExecuteProcess(
-        cmd=['ros2', 'run', 'rqt_robot_steering', 'rqt_robot_steering', '--force-discover'],
-        output='screen'
+    
+    odom = Node(
+        package="limo_controller",
+        executable="forward_kinematics.py",
+        name="fk_node",
+        output="screen"
     )
     
-    # Odometry launch
-    limo_kinematics = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(pkg_limo_controller, 'launch', 'limo_kinematics.launch.py')
-        )
+    stanley = Node(
+        package="limo_controller",
+        executable="stanley.py",
+        name="stanley_node",
+        output="screen"
     )
-    
-
     
 
     # Create the launch description and populate
@@ -43,8 +43,8 @@ def generate_launch_description():
     # Declare the launch options
 
     ld.add_action(limo_description)
-    ld.add_action(rqt_robot_steering)
-    ld.add_action(limo_kinematics)
+    ld.add_action(odom)
+    ld.add_action(stanley)
 
 
     return ld
