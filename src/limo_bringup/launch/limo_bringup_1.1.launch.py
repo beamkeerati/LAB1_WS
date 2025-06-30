@@ -29,7 +29,7 @@ def generate_launch_description():
     
     #
     rqt_robot_steering = ExecuteProcess(
-        cmd=['ros2', 'run', 'rqt_robot_steering', 'rqt_robot_steering'],
+        cmd=['ros2', 'run', 'rqt_robot_steering', 'rqt_robot_steering', '--force-discover'],
         output='screen'
     )
 
@@ -39,7 +39,7 @@ def generate_launch_description():
     ld = LaunchDescription()
 
     # Declare the launch options
-    ld.add_action(limo_kinematics)
+    # ld.add_action(limo_kinematics)
     ld.add_action(limo_description)
     ld.add_action(rqt_robot_steering)
 

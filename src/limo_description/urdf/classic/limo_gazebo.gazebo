@@ -7,7 +7,6 @@
             <type>transmission_interface/SimpleTransmission</type>
             <actuator name="${wheel_prefix}_wheel_motor">
                 <hardwareInterface>hardware_interface/VelocityJointInterface</hardwareInterface>
-                <!-- <mechanicalReduction>1</mechanicalReduction> -->
             </actuator>
             <joint name="${wheel_prefix}_wheel">
                 <hardwareInterface>hardware_interface/VelocityJointInterface</hardwareInterface>
@@ -20,7 +19,6 @@
             <type>transmission_interface/SimpleTransmission</type>
             <actuator name="${wheel_prefix}_wheel_motor">
                 <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
-                <!-- <mechanicalReduction>1</mechanicalReduction> -->
             </actuator>
             <joint name="${wheel_prefix}_wheel">
                 <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
@@ -55,17 +53,17 @@
                 </noise>
               </ray>
               <plugin name="gazebo_ros_laser_sensor" filename="libgazebo_ros_ray_sensor.so">
-              <ros>
-                <remapping>~/out:=scan</remapping>
-              </ros>
+                <ros>
+                  <remapping>~/out:=scan</remapping>
+                </ros>
                 <topicName>/limo/scan</topicName>
                 <frameName>laser_link</frameName>
               </plugin>
             </sensor>
-          </gazebo>
+        </gazebo>
     </xacro:macro>
 
-    <xacro:macro name="gazebo_depth_camera" params="frame_prefix">
+        <xacro:macro name="gazebo_depth_camera" params="frame_prefix">
         <gazebo reference="${frame_prefix}_link">
           <sensor name="sensor_camera" type="depth">
             <pose>0.0 0.0 0.0 0.0 0.0 0.0</pose>
@@ -85,36 +83,21 @@
               </clip>
             </camera>
 
-            <plugin name="gazebo_ros_depth_camera_sensor" filename="libgazebo_ros_openni_kinect.so">
+            <plugin name="gazebo_ros_depth_camera_sensor" filename="libgazebo_ros_camera.so">
               <baseline>0.2</baseline>
               <alwaysOn>true</alwaysOn>
-              <!-- Keep this zero, update_rate in the parent <sensor> tag
-                will control the frame rate. -->
               <updateRate>10.0</updateRate>
-              <cameraName>camera_ir</cameraName>
+              <frame_name>depth_link</frame_name>
               <imageTopicName>/limo/color/image_raw</imageTopicName>
               <cameraInfoTopicName>/limo/color/camera_info</cameraInfoTopicName>
               <depthImageTopicName>/limo/depth/image_raw</depthImageTopicName>
               <depthImageCameraInfoTopicName>/limo/depth/camera_info</depthImageCameraInfoTopicName>
               <pointCloudTopicName>/limo/depth/points</pointCloudTopicName>
-              <frameName>depth_link</frameName>
-              <cameraname>depth_camera_link</cameraname>
-              
               <pointCloudCutoff>0.5</pointCloudCutoff>
               <pointCloudCutoffMax>3.0</pointCloudCutoffMax>
-              <distortionK1>0</distortionK1>
-              <distortionK2>0</distortionK2>
-              <distortionK3>0</distortionK3>
-              <distortionT1>0</distortionT1>
-              <distortionT2>0</distortionT2>
-              <CxPrime>0</CxPrime>
-              <Cx>0</Cx>
-              <Cy>0</Cy>
-              <focalLength>0</focalLength>
-              <hackBaseline>0</hackBaseline>
             </plugin>
         </sensor>
-          </gazebo>
+        </gazebo>
     </xacro:macro>
 
     <xacro:macro name="gazebo_imu" params="frame_prefix">
@@ -138,4 +121,5 @@
         </sensor>
       </gazebo>
   </xacro:macro>
+
 </robot>

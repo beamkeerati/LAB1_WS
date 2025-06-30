@@ -29,7 +29,7 @@ def generate_launch_description():
 
     # Launch rqt_robot_steering (currently defined but not added; uncomment if needed)
     rqt_robot_steering = ExecuteProcess(
-        cmd=['ros2', 'run', 'rqt_robot_steering', 'rqt_robot_steering'],
+        cmd=['ros2', 'run', 'rqt_robot_steering', 'rqt_robot_steering', '--force-discover'],
         output='screen'
     )
     # Node for EKF

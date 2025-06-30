@@ -15,7 +15,7 @@ def generate_launch_description():
     package_name = 'limo_description'
     robot_name_in_model = 'limo_description'
     rviz_config_file_path = 'rviz/lab2.rviz'
-    urdf_file_path = 'urdf/limo_ackerman.xacro'
+    urdf_file_path = 'urdf/classic/limo_ackerman.xacro'
     # world_file = 'l4rralde_gym.world'
     world_file = 'basic.world'
 
