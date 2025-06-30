@@ -4,9 +4,9 @@
     xmlns:xacro="http://ros.org/wiki/xacro">
 
     <xacro:arg name="robot_namespace" default="/" />
-    <xacro:include filename="$(find limo_description)/urdf/limo_xacro.xacro" />
-    <xacro:include filename="$(find limo_description)/urdf/limo_steering_hinge.xacro" />
-    <xacro:include filename="$(find limo_description)/urdf/limo_ackerman.gazebo" />
+    <xacro:include filename="$(find limo_description)/urdf/ign/limo_xacro.xacro" />
+    <xacro:include filename="$(find limo_description)/urdf/ign/limo_steering_hinge.xacro" />
+    <xacro:include filename="$(find limo_description)/urdf/ign/limo_ackerman.gazebo" />
 
     <!-- Variables -->
     <xacro:property name="M_PI" value="3.14159"/>
@@ -183,16 +183,16 @@
     </gazebo>
 
     <gazebo reference="front_left_wheel_link">
-        <mu1>10.0</mu1>
-        <mu2>10.0</mu2>
+        <mu1>1.0</mu1>
+        <mu2>1.0</mu2>
         <minDepth>0.001</minDepth>
         <kp value="10000000.0"/>
         <kd value="1.0"/>
     </gazebo>
 
     <gazebo reference="front_right_wheel_link">
-        <mu1>10.0</mu1>
-        <mu2>10.0</mu2>
+        <mu1>1.0</mu1>
+        <mu2>1.0</mu2>
         <minDepth>0.001</minDepth>
         <kp value="1000000.0"/>
         <kd value="1.0"/>

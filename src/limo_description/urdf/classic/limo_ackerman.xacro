@@ -4,8 +4,9 @@
     xmlns:xacro="http://ros.org/wiki/xacro">
 
     <xacro:arg name="robot_namespace" default="/" />
-    <xacro:include filename="$(find limo_description)/urdf/limo_xacro.xacro" />
-    <xacro:include filename="$(find limo_description)/urdf/limo_steering_hinge.xacro" />
+    <xacro:include filename="$(find limo_description)/urdf/classic/limo_xacro.xacro" />
+    <xacro:include filename="$(find limo_description)/urdf/classic/limo_steering_hinge.xacro" />
+    <xacro:include filename="$(find limo_description)/urdf/classic/limo_ackerman.gazebo" />
 
     <!-- Variables -->
     <xacro:property name="M_PI" value="3.14159"/>
@@ -22,21 +23,20 @@
 
     <xacro:property name="wheel_length" value="0.045" />
     <xacro:property name="wheel_radius" value="0.045" />
-    
     <link name="base_footprint"/>
 
     <joint name="base_joint" type="fixed">
         <parent link="base_footprint"/>
         <child link="base_link"/>
         <origin xyz="0.0 0.0 0.15" rpy="0 0 0"/>
+        <!-- <origin xyz="0.0 0.0 0.0" rpy="0 0 0"/> -->
     </joint>
-    
     <!-- Base link -->
     <link name="base_link">
         <visual>
             <origin xyz="0 0 -0.15" rpy="0 0 1.57" />
             <geometry>
-                <mesh filename="file://$(find limo_description)/meshes/limo_base.dae" scale="1 1 1"/>
+                <mesh filename="package://limo_description/meshes/limo_base.dae" scale="1 1 1"/>
             </geometry>
         </visual>
         <collision>
@@ -81,6 +81,7 @@
         <origin xyz="${wheelbase/2} ${-track/2} ${wheel_vertical_offset}" rpy="${M_PI} 0 0" />
     </xacro:limo_right_steering_hinge>
 
+
     <link name="rear_left_wheel_link">
         <inertial>
             <origin xyz="0 0 0" />
@@ -90,7 +91,7 @@
         <visual>
             <origin xyz="0 0 0" rpy="0 0 0" />
             <geometry>
-                <mesh filename="file://$(find limo_description)/meshes/limo_wheel.dae" />
+                <mesh filename="package://limo_description/meshes/limo_wheel.dae" />
             </geometry>
         </visual>
         <collision>
@@ -117,7 +118,7 @@
         <visual>
             <origin xyz="0 0 0" rpy="0 0 0" />
             <geometry>
-                <mesh filename="file://$(find limo_description)/meshes/limo_wheel.dae" />
+                <mesh filename="package://limo_description/meshes/limo_wheel.dae" />
             </geometry>
         </visual>
         <collision>
@@ -135,13 +136,12 @@
         <axis xyz="0 -1 0"/>
     </joint>
 
-    <!-- ros2_control configuration for gz_ros2_control -->
+    <!-- FIXED: Changed plugin name from gz_ros2_control/GazeboSimSystem to gazebo_ros2_control/GazeboSystem -->
     <ros2_control name="GazeboSimSystem" type="system">
         <hardware>
-            <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+            <plugin>gazebo_ros2_control/GazeboSystem</plugin>
         </hardware>
 
-        <!-- Steering joints (position control) -->
         <joint name="left_steering_hinge_wheel">
             <command_interface name="position"/>
             <state_interface name="position"/>
@@ -154,7 +154,6 @@
             <state_interface name="velocity"/>
         </joint>
 
-        <!-- Front wheels (state only) -->
         <joint name="front_left_wheel">
             <state_interface name="position"/>
             <state_interface name="velocity"/>
@@ -165,7 +164,6 @@
             <state_interface name="velocity"/>
         </joint>
 
-        <!-- Rear wheels (velocity control) -->
         <joint name="rear_left_wheel">
             <command_interface name="velocity"/>
             <state_interface name="position"/>
@@ -179,7 +177,6 @@
         </joint>
     </ros2_control>
 
-    <!-- Gazebo settings -->
     <gazebo reference="base_link">
         <minDepth>0.001</minDepth>
         <kp value="10000000.0"/>
@@ -187,52 +184,19 @@
     </gazebo>
 
     <gazebo reference="front_left_wheel_link">
-        <mu1>10.0</mu1>
-        <mu2>10.0</mu2>
+        <mu1>1.0</mu1>
+        <mu2>1.0</mu2>
         <minDepth>0.001</minDepth>
         <kp value="10000000.0"/>
         <kd value="1.0"/>
     </gazebo>
 
     <gazebo reference="front_right_wheel_link">
-        <mu1>10.0</mu1>
-        <mu2>10.0</mu2>
+        <mu1>1.0</mu1>
+        <mu2>1.0</mu2>
         <minDepth>0.001</minDepth>
         <kp value="1000000.0"/>
         <kd value="1.0"/>
-    </gazebo>
-
-    <gazebo reference="rear_left_wheel_link">
-        <mu1>10.0</mu1>
-        <mu2>10.0</mu2>
-        <minDepth>0.001</minDepth>
-        <kp value="10000000.0"/>
-        <kd value="1.0"/>
-    </gazebo>
-
-    <gazebo reference="rear_right_wheel_link">
-        <mu1>10.0</mu1>
-        <mu2>10.0</mu2>
-        <minDepth>0.001</minDepth>
-        <kp value="1000000.0"/>
-        <kd value="1.0"/>
-    </gazebo>
-
-    <!-- gz_ros2_control plugin -->
-    <gazebo>
-        <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
-            <parameters>$(find limo_description)/config/limo_controller.yaml</parameters>
-        </plugin>
-    </gazebo>
-
-    <!-- Odometry Publisher plugin - Correct for Gazebo Fortress -->
-    <gazebo>
-        <plugin filename="libignition-gazebo6-odometry-publisher-system.so" name="ignition::gazebo::systems::OdometryPublisher">
-            <odom_frame>odom</odom_frame>
-            <robot_base_frame>base_footprint</robot_base_frame>
-            <odom_topic>odom</odom_topic>
-            <odom_publish_frequency>1000.0</odom_publish_frequency>
-        </plugin>
     </gazebo>
 
 </robot>

@@ -65,6 +65,7 @@
           </gazebo>
     </xacro:macro>
 
+    <!-- FIXED: Updated depth camera plugin from deprecated openni_kinect to newer depth camera plugin -->
     <xacro:macro name="gazebo_depth_camera" params="frame_prefix">
         <gazebo reference="${frame_prefix}_link">
           <sensor name="sensor_camera" type="depth">
@@ -85,33 +86,20 @@
               </clip>
             </camera>
 
-            <plugin name="gazebo_ros_depth_camera_sensor" filename="libgazebo_ros_openni_kinect.so">
-              <baseline>0.2</baseline>
-              <alwaysOn>true</alwaysOn>
-              <!-- Keep this zero, update_rate in the parent <sensor> tag
-                will control the frame rate. -->
-              <updateRate>10.0</updateRate>
-              <cameraName>camera_ir</cameraName>
-              <imageTopicName>/limo/color/image_raw</imageTopicName>
-              <cameraInfoTopicName>/limo/color/camera_info</cameraInfoTopicName>
-              <depthImageTopicName>/limo/depth/image_raw</depthImageTopicName>
-              <depthImageCameraInfoTopicName>/limo/depth/camera_info</depthImageCameraInfoTopicName>
-              <pointCloudTopicName>/limo/depth/points</pointCloudTopicName>
-              <frameName>depth_link</frameName>
-              <cameraname>depth_camera_link</cameraname>
-              
-              <pointCloudCutoff>0.5</pointCloudCutoff>
-              <pointCloudCutoffMax>3.0</pointCloudCutoffMax>
-              <distortionK1>0</distortionK1>
-              <distortionK2>0</distortionK2>
-              <distortionK3>0</distortionK3>
-              <distortionT1>0</distortionT1>
-              <distortionT2>0</distortionT2>
-              <CxPrime>0</CxPrime>
-              <Cx>0</Cx>
-              <Cy>0</Cy>
-              <focalLength>0</focalLength>
-              <hackBaseline>0</hackBaseline>
+            <!-- UPDATED: Using the newer depth camera plugin -->
+            <plugin name="gazebo_ros_depth_camera_sensor" filename="libgazebo_ros_depth_camera.so">
+              <ros>
+                <remapping>color/image_raw:=/limo/color/image_raw</remapping>
+                <remapping>color/camera_info:=/limo/color/camera_info</remapping>
+                <remapping>depth/image_raw:=/limo/depth/image_raw</remapping>
+                <remapping>depth/camera_info:=/limo/depth/camera_info</remapping>
+                <remapping>points:=/limo/depth/points</remapping>
+              </ros>
+              <camera_name>depth_camera</camera_name>
+              <frame_name>depth_link</frame_name>
+              <hack_baseline>0.07</hack_baseline>
+              <min_depth>0.001</min_depth>
+              <max_depth>300.0</max_depth>
             </plugin>
         </sensor>
           </gazebo>

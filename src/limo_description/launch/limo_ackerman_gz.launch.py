@@ -38,7 +38,7 @@ def generate_launch_description():
             ' ',
             PathJoinSubstitution(
                 [FindPackageShare('limo_description'),
-                 'urdf', 'limo_ackerman_gz.xacro']
+                 'urdf','ign', 'limo_ackerman_gz.xacro']
             ),
         ]
     )
