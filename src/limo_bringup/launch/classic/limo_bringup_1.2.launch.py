@@ -23,7 +23,7 @@ def generate_launch_description():
     # Include a description launch file from the limo_description package.
     limo_description = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_limo_description, 'launch', 'construct_path.launch.py')
+            os.path.join(pkg_limo_description, 'launch','classic', 'construct_path.launch.py')
         )
     )
 
