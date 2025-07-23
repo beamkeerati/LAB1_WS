@@ -93,8 +93,7 @@ class MPCNode(Node):
         self.robot_odom = None  # Initialize as None, will be set in callback
         
         # Set up publishers
-        self.steering_pub = self.create_publisher(Float64MultiArray, "/steering_controller/commands", 10)
-        self.velocity_pub = self.create_publisher(Float64MultiArray, "/velocity_controller/commands", 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self.path_pub = self.create_publisher(Path, "/path", 10)
         
         # Load the path from YAML
@@ -561,24 +560,14 @@ class MPCNode(Node):
         linear_vel = np.clip(linear_vel, MIN_LINEAR_VEL, MAX_LINEAR_VEL)
         angular_vel = np.clip(angular_vel, MIN_ANGULAR_VEL, MAX_ANGULAR_VEL)
         
-        # Convert to wheel speeds for differential drive
-        # v_left = linear_vel - (angular_vel * track_width / 2)
-        # v_right = linear_vel + (angular_vel * track_width / 2)
-        v_left = linear_vel - (angular_vel * self.track / 2.0)
-        v_right = linear_vel + (angular_vel * self.track / 2.0)
+        msg = Twist()
+        msg.linear.x = linear_vel
+        msg.angular.z = angular_vel
         
-        # Convert to wheel angular velocities
-        wheel_speed_left = v_left / self.wheel_radius
-        wheel_speed_right = v_right / self.wheel_radius
-        
-        # Set steering angles to 0 (differential drive)
-        self.set_steering_angle(0.0, 0.0)
-        
-        # Set wheel velocities
-        self.set_velocity(wheel_speed_left, wheel_speed_right)
+        self.cmd_vel_pub.publish(msg)
         
         # Debug output
-        self.get_logger().debug(f"Commands: linear={linear_vel:.3f}, angular={angular_vel:.3f}, wheels=[{wheel_speed_left:.2f}, {wheel_speed_right:.2f}]")
+        self.get_logger().debug(f"Commands: linear={linear_vel:.3f}, angular={angular_vel:.3f}]")
 
     def cmd_vel_steering(self, vx, steering_angle):
         """Convert desired steering angle and velocity to wheel commands (legacy function)"""
@@ -602,20 +591,6 @@ class MPCNode(Node):
     def odom_callback(self, msg: Odometry):
         """Odometry callback"""
         self.robot_odom = msg
-
-    def set_steering_angle(self, left_angle, right_angle):
-        """Set steering angles"""
-        msg = Float64MultiArray()
-        msg.layout.data_offset = 0
-        msg.data = [float(left_angle), float(right_angle)]
-        self.steering_pub.publish(msg)
-
-    def set_velocity(self, left_speed, right_speed):
-        """Set wheel velocities"""
-        msg = Float64MultiArray()
-        msg.layout.data_offset = 0
-        msg.data = [float(left_speed), float(right_speed)]
-        self.velocity_pub.publish(msg)
 
 def main(args=None):
     try:
