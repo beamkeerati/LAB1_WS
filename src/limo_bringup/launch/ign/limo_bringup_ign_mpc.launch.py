@@ -41,16 +41,16 @@ def generate_launch_description():
         executable="mpc_4states.py",  # Use the improved version
         name="mpc_node",
         output="screen",
-        parameters=[
-            {"target_speed": 0.8},
-            {"horizon_length": 15},
-            {"control_dt": 0.05},
-            {"max_speed": 1.2},
-            {"max_steer_deg": 8.0},
-            {"position_weight": 10.0},
-            {"yaw_weight": 5.0},
-            {"mode": "car"},
-        ],
+        # parameters=[
+        #     {"target_speed": 0.8},
+        #     {"horizon_length": 15},
+        #     {"control_dt": 0.05},
+        #     {"max_speed": 1.2},
+        #     {"max_steer_deg": 8.0},
+        #     {"position_weight": 10.0},
+        #     {"yaw_weight": 5.0},
+        #     {"mode": "car"},
+        # ],
     )
 
     # Inverse kinematics node
@@ -82,7 +82,7 @@ def generate_launch_description():
     ld.add_action(
         DeclareLaunchArgument(
             "enable_tracking_measurement",
-            default_value="true",
+            default_value="false",
             description="Enable path tracking measurement node",
         )
     )

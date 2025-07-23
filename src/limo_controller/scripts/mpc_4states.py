@@ -134,17 +134,17 @@ class MPCConfig:
     # State and Control Dimensions
     NX = 4  # x = x, y, v, yaw
     NU = 2  # a = [accel, steer]
-    T = 15  # INCREASED horizon length for better lookahead
+    T = 25  # INCREASED horizon length for better lookahead
 
     # IMPROVED MPC Cost Matrices for better tracking
-    R = np.diag([0.1, 0.1])  # INCREASED input cost to reduce aggressiveness
-    Rd = np.diag([0.05, 0.5])  # BALANCED input difference cost
-    Q = np.diag([10.0, 10.0, 1.0, 5.0])  # INCREASED position and yaw tracking weights
-    Qf = np.diag([15.0, 15.0, 1.0, 10.0])  # HIGHER terminal cost for stability
+    R = np.diag([10, 1])  # Less aggressive accel, smoother steer
+    Rd = np.diag([0.03, 0.35])  # Smooth control changes
+    Q = np.diag([40.0, 40.0, 10.0, 100.0])  # 4x position, 7x yaw tracking
+    Qf = np.diag([60.0, 60.0, 1.2, 50.0])  # Strong terminal costs
 
     # Goal and Stopping Parameters
     GOAL_DIS = 1.0  # REDUCED for more precise goal reaching
-    STOP_SPEED = 0.2 / 3.6  # REDUCED stop speed
+    STOP_SPEED = 0.5  # REDUCED stop speed
     MAX_TIME = 500.0
 
     # Iterative Parameters
@@ -152,11 +152,11 @@ class MPCConfig:
     DU_TH = 0.05  # REDUCED threshold for more precise convergence
 
     # Speed Parameters
-    TARGET_SPEED = 0.8  # REDUCED target speed for better tracking
+    TARGET_SPEED = 0.6  # REDUCED target speed for better tracking
     N_IND_SEARCH = 15  # INCREASED search range
 
     # Time Step
-    DT = 0.05  # INCREASED time step for more reasonable horizon
+    DT = 0.04  # INCREASED time step for more reasonable horizon
 
     # Vehicle Physical Parameters
     LENGTH = 4.5
@@ -173,13 +173,13 @@ class MPCConfig:
     TRACK_WIDTH = 0.14
 
     # IMPROVED Control Constraints
-    MAX_STEER = math.radians(8.0)  # REDUCED max steering for smoother control
-    MAX_DSTEER = math.radians(3.0)  # REDUCED steering rate for smoother control
-    MAX_SPEED = 1.2  # Slightly increased
-    MIN_SPEED = -0.5  # Limited reverse speed
-    MAX_ACCEL = 0.3  # REDUCED max acceleration for smoother control
-    MAX_LINEAR_VEL = 1.2
-    MIN_LINEAR_VEL = -0.5
+    MAX_STEER = math.radians(10.0)  # REDUCED max steering for smoother control
+    MAX_DSTEER = math.radians(10.0)  # REDUCED steering rate for smoother control
+    MAX_SPEED = 1.0  # Slightly increased
+    MIN_SPEED = -1.0  # Limited reverse speed
+    MAX_ACCEL = 0.1  # REDUCED max acceleration for smoother control
+    MAX_LINEAR_VEL = 1.0
+    MIN_LINEAR_VEL = -1.0
     MAX_ANGULAR_VEL = math.radians(15)  # INCREASED for better turning
     MIN_ANGULAR_VEL = -math.radians(15)
 
