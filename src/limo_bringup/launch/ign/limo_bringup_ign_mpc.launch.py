@@ -51,7 +51,7 @@ def generate_launch_description():
 
     ld.add_action(limo_description)
     ld.add_action(odom)
-    ld.add_action(mpc)
+    # ld.add_action(mpc)
     ld.add_action(inv_kin)
 
     return ld

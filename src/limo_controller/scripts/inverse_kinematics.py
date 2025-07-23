@@ -33,7 +33,7 @@ class IKNode(Node):
 
     def cmd_callback(self, msg: Twist):
         # Log received command
-        self.get_logger().info(f"Linear: {msg.linear.x}, Angular: {msg.angular.z}")
+        # self.get_logger().info(f"Linear: {msg.linear.x}, Angular: {msg.angular.z}")
         
         # Retrieve control mode parameter
         mode = self.get_parameter("mode").get_parameter_value().string_value
