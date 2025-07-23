@@ -5,8 +5,15 @@ from rclpy.node import Node
 from rclpy.exceptions import ParameterAlreadyDeclaredException
 from sensor_msgs.msg import JointState, Imu
 from geometry_msgs.msg import (
-    Point, Pose, PoseStamped, PoseWithCovariance, Quaternion, Twist, TwistWithCovariance,
-    Vector3, TransformStamped
+    Point,
+    Pose,
+    PoseStamped,
+    PoseWithCovariance,
+    Quaternion,
+    Twist,
+    TwistWithCovariance,
+    Vector3,
+    TransformStamped,
 )
 from nav_msgs.msg import Odometry, Path
 from std_msgs.msg import Float64, Float64MultiArray
@@ -64,7 +71,7 @@ TRACK_WIDTH = 0.14  # [m] track width
 MAX_STEER = math.radians(10.0)  # maximum steering angle [rad]
 MAX_DSTEER = math.radians(5.0)  # maximum steering speed [rad/s]
 MAX_SPEED = 1.0  # maximum speed [m/s]
-MIN_SPEED = 1.0  # minimum speed [m/s]
+MIN_SPEED = -1.0  # minimum speed [m/s] - FIXED: Allow reverse
 MAX_ACCEL = 0.5  # maximum accel [m/ss]
 MAX_LINEAR_VEL = 1.0  # maximum linear velocity [m/s]
 MIN_LINEAR_VEL = -1.0  # minimum linear velocity [m/s]
@@ -75,7 +82,7 @@ MIN_ANGULAR_VEL = -math.radians(5)  # minimum angular velocity [rad/s]
 class MPCNode(Node):
     def __init__(self):
         # Use a unique node name to avoid conflicts
-        super().__init__('mpc_path_tracker')
+        super().__init__("mpc_path_tracker")
 
         # Declare and retrieve parameters (with error handling)
         self._declare_parameter_if_not_exists("mode", "car")
@@ -89,13 +96,17 @@ class MPCNode(Node):
             self.get_logger().warn("Using default mode: car")
 
         try:
-            self.target_speed = self.get_parameter("target_speed").get_parameter_value().double_value
+            self.target_speed = (
+                self.get_parameter("target_speed").get_parameter_value().double_value
+            )
         except:
             self.target_speed = 0.8
             self.get_logger().warn("Using default target_speed: 0.8 m/s")
 
         # Set up subscriber and timer
-        self.odom_sub = self.create_subscription(Odometry, '/odometry/ground_truth', self.odom_callback, 10)
+        self.odom_sub = self.create_subscription(
+            Odometry, "/odometry/ground_truth", self.odom_callback, 10
+        )
         self.create_timer(DT, self.timer_callback)  # MPC control loop
         self.robot_odom = None  # Initialize as None, will be set in callback
 
@@ -106,7 +117,11 @@ class MPCNode(Node):
         # Load the path from YAML
         self.path = self.read_path()
         self.path_index = 0
-        self.get_logger().info(f"Loaded path with {self.path.shape[0]} points." if self.path is not None else "Path not loaded!")
+        self.get_logger().info(
+            f"Loaded path with {self.path.shape[0]} points."
+            if self.path is not None
+            else "Path not loaded!"
+        )
 
         # Publish the full path
         self.publish_path()
@@ -114,8 +129,8 @@ class MPCNode(Node):
         # ------------------------------------------#
         # Vehicle parameters (from FK node)
         self.wheel_radius = WHEEL_RADIUS  # [m]
-        self.l = WHEEL_BASE              # wheelbase for steering conversion
-        self.track = TRACK_WIDTH         # [m], track width
+        self.l = WHEEL_BASE  # wheelbase for steering conversion
+        self.track = TRACK_WIDTH  # [m], track width
 
         # MPC state variables
         self.current_state = State()
@@ -124,6 +139,11 @@ class MPCNode(Node):
         self.prev_angular_vel = 0.0  # previous angular velocity commands
 
         self.linear_x = 0.0  # linear velocity command
+
+        # ADDED: Error handling and fallback variables
+        self.mpc_failed_count = 0
+        self.max_mpc_failures = 10
+        self.emergency_stop = False
 
         # Convert path to MPC format
         if self.path is not None:
@@ -137,24 +157,28 @@ class MPCNode(Node):
         try:
             self.declare_parameter(name, default_value)
         except ParameterAlreadyDeclaredException:
-            self.get_logger().debug(f"Parameter '{name}' already declared, using existing value")
+            self.get_logger().debug(
+                f"Parameter '{name}' already declared, using existing value"
+            )
 
     def read_path(self):
         """Load path from YAML file (same as Stanley controller)"""
         try:
-            pkg = get_package_share_directory('limo_controller')
-            yaml_path = os.path.join(pkg, 'path', 'path.yaml')
+            pkg = get_package_share_directory("limo_controller")
+            yaml_path = os.path.join(pkg, "path", "path.yaml")
 
-            with open(yaml_path, 'r') as file:
+            with open(yaml_path, "r") as file:
                 data = yaml.safe_load(file)
 
             path_points = []
             for point in data:
-                x = point.get('x')
-                y = point.get('y')
-                yaw = point.get('yaw')
+                x = point.get("x")
+                y = point.get("y")
+                yaw = point.get("yaw")
                 if x is None or y is None or yaw is None:
-                    self.get_logger().warn("Point missing required key: 'x', 'y', or 'yaw'.")
+                    self.get_logger().warn(
+                        "Point missing required key: 'x', 'y', or 'yaw'."
+                    )
                     continue
                 path_points.append([x, y, yaw])
 
@@ -198,15 +222,23 @@ class MPCNode(Node):
         self.cx = self.path[:, 0]  # x coordinates
         self.cy = self.path[:, 1]  # y coordinates
         self.cyaw = self.path[:, 2]  # yaw angles
-        self.ck = [0.0] * len(self.cx) # curvature
-        self.sp = calc_speed_profile(self.cx, self.cy, self.cyaw, TARGET_SPEED) # speed profile
-        self.dl = calculate_path_distance(self.cx, self.cy) # path spacing
+        self.ck = [0.0] * len(self.cx)  # curvature
+        self.sp = calc_speed_profile(
+            self.cx, self.cy, self.cyaw, TARGET_SPEED
+        )  # speed profile
+        self.dl = calculate_path_distance(self.cx, self.cy)  # path spacing
         self.cyaw = smooth_yaw(self.cyaw)  # smooth yaw angles
 
         self.get_logger().info("MPC Controller initialized successfully")
-        self.get_logger().info(f"Vehicle params: wheelbase={WB:.3f}m, track={TRACK_WIDTH:.3f}m, wheel_radius={WHEEL_RADIUS:.3f}m")
-        self.get_logger().info(f"Target speed: {self.target_speed:.2f}m/s, Control mode: differential drive")
-        self.get_logger().info(f"MPC params: T={T}, DT={DT:.3f}s, MAX_LINEAR_VEL={MAX_LINEAR_VEL:.1f}m/s, MAX_ANGULAR_VEL={MAX_ANGULAR_VEL:.1f}rad/s")
+        self.get_logger().info(
+            f"Vehicle params: wheelbase={WB:.3f}m, track={TRACK_WIDTH:.3f}m, wheel_radius={WHEEL_RADIUS:.3f}m"
+        )
+        self.get_logger().info(
+            f"Target speed: {self.target_speed:.2f}m/s, Control mode: differential drive"
+        )
+        self.get_logger().info(
+            f"MPC params: T={T}, DT={DT:.3f}s, MAX_LINEAR_VEL={MAX_LINEAR_VEL:.1f}m/s, MAX_ANGULAR_VEL={MAX_ANGULAR_VEL:.1f}rad/s"
+        )
 
     def init_mpc(self):
         initial_state = State(x=self.cx[0], y=self.cy[0], yaw=self.cyaw[0], v=0.0)
@@ -219,7 +251,9 @@ class MPCNode(Node):
         elif self.state.yaw - self.cyaw[0] <= -math.pi:
             self.state.yaw += math.pi * 2.0
 
-        self.target_ind, _ = calc_nearest_index(self.state, self.cx, self.cy, self.cyaw, 0)
+        self.target_ind, _ = calc_nearest_index(
+            self.state, self.cx, self.cy, self.cyaw, 0
+        )
         # self.get_logger().info(f"{self.target_ind}")
 
         self.odelta, self.oa = None, None
@@ -231,49 +265,172 @@ class MPCNode(Node):
             return
 
         # Check if robot odometry is available
-        if not hasattr(self.robot_odom, 'pose') or self.robot_odom.pose is None:
+        if not hasattr(self.robot_odom, "pose") or self.robot_odom.pose is None:
             self.get_logger().debug("Robot odometry not available yet")
+            return
+
+        # Check for emergency stop
+        if self.emergency_stop:
+            self.pub_emergency_stop()
             return
 
         # Update current state from odometry
         try:
             self.current_state = self.get_state(self.robot_odom)
+            self.state = self.current_state  # Update MPC state with real odometry
         except Exception as e:
             self.get_logger().error(f"Error reading odometry: {e}")
             return
 
-        xref, self.target_ind, dref = calc_ref_trajectory(
-            self.state,
-            self.cx,
-            self.cy,
-            self.cyaw,
-            self.ck,
-            self.sp,
-            self.dl,
-            self.target_ind,
-        )
+        try:
+            xref, self.target_ind, dref = calc_ref_trajectory(
+                self.state,
+                self.cx,
+                self.cy,
+                self.cyaw,
+                self.ck,
+                self.sp,
+                self.dl,
+                self.target_ind,
+            )
 
-        x0 = [self.state.x, self.state.y, self.state.v, self.state.yaw]  # current state
+            # ADDED: Detailed logging for analysis
+            self.log_tracking_errors(xref)
 
-        self.oa, self.odelta, ox, oy, oyaw, ov = iterative_linear_mpc_control(
-            xref, x0, dref, self.oa, self.odelta
-        )
+            x0 = [
+                self.state.x,
+                self.state.y,
+                self.state.v,
+                self.state.yaw,
+            ]  # current state
 
-        di, ai = 0.0, 0.0
-        if self.odelta is not None:
-            di, ai = self.odelta[0], self.oa[0]
+            self.oa, self.odelta, ox, oy, oyaw, ov = iterative_linear_mpc_control(
+                xref, x0, dref, self.oa, self.odelta
+            )
+
+            # ADDED: Better error handling for MPC failure
+            if self.oa is None or self.odelta is None:
+                self.mpc_failed_count += 1
+                self.get_logger().warn(
+                    f"MPC control failed ({self.mpc_failed_count}/{self.max_mpc_failures})"
+                )
+
+                if self.mpc_failed_count >= self.max_mpc_failures:
+                    self.get_logger().error(
+                        "Too many MPC failures, entering emergency stop mode"
+                    )
+                    self.emergency_stop = True
+                    self.pub_emergency_stop()
+                    return
+
+                # Use simple proportional control as fallback
+                di, ai = self.simple_control_fallback(xref)
+            else:
+                # Reset failure count on successful solve
+                self.mpc_failed_count = 0
+                di, ai = self.odelta[0], self.oa[0]
+                self.get_logger().debug(f"MPC success: ai={ai:.3f}, di={di:.3f}")
+
             self.pub_cmd_vel(di, ai)  # Publish command velocity
 
-            # self.state = update_state(self.state, ai, di) # In Simulation
-            self.state = self.get_state(self.robot_odom)
+        except Exception as e:
+            self.get_logger().error(f"Error in MPC control: {e}")
+            self.pub_emergency_stop()
+
+    def log_tracking_errors(self, xref):
+        """Log detailed tracking errors for parameter tuning analysis"""
+        if self.target_ind < len(self.cx):
+            # Current position
+            current_x = self.state.x
+            current_y = self.state.y
+            current_yaw = self.state.yaw
+            current_v = self.state.v
+
+            # Target position (reference trajectory first point)
+            target_x = xref[0, 0]
+            target_y = xref[1, 0]
+            target_v = xref[2, 0]
+            target_yaw = xref[3, 0]
+
+            # Calculate errors
+            pos_error = math.sqrt(
+                (current_x - target_x) ** 2 + (current_y - target_y) ** 2
+            )
+            yaw_error = abs(pi_2_pi(current_yaw - target_yaw))
+            vel_error = abs(current_v - target_v)
+
+            # Path following error (cross-track error)
+            nearest_path_x = self.cx[self.target_ind]
+            nearest_path_y = self.cy[self.target_ind]
+            cross_track_error = math.sqrt(
+                (current_x - nearest_path_x) ** 2 + (current_y - nearest_path_y) ** 2
+            )
+
+            # Log every 100 cycles to avoid spam
+            if hasattr(self, "log_counter"):
+                self.log_counter += 1
+            else:
+                self.log_counter = 0
+
+            if self.log_counter % 100 == 0:
+                self.get_logger().info(
+                    f"Tracking Errors - Position: {pos_error:.3f}m, CrossTrack: {cross_track_error:.3f}m, "
+                    f"Yaw: {math.degrees(yaw_error):.1f}deg, Velocity: {vel_error:.3f}m/s"
+                )
+                self.get_logger().info(
+                    f"Current State - X: {current_x:.3f}, Y: {current_y:.3f}, "
+                    f"Yaw: {math.degrees(current_yaw):.1f}deg, V: {current_v:.3f}m/s"
+                )
+                self.get_logger().info(
+                    f"Target State - X: {target_x:.3f}, Y: {target_y:.3f}, "
+                    f"Yaw: {math.degrees(target_yaw):.1f}deg, V: {target_v:.3f}m/s"
+                )
+
+    def simple_control_fallback(self, xref):
+        """Simple proportional control when MPC fails"""
+        if xref is None:
+            return 0.0, -0.1
+
+        # Simple proportional control gains
+        kp_pos = 0.5
+        kp_yaw = 1.0
+        kp_vel = 1.0
+
+        # Target from reference trajectory
+        target_x = xref[0, 0]
+        target_y = xref[1, 0]
+        target_v = xref[2, 0]
+        target_yaw = xref[3, 0]
+
+        # Current state
+        current_x = self.state.x
+        current_y = self.state.y
+        current_yaw = self.state.yaw
+        current_v = self.state.v
+
+        # Calculate desired heading to target
+        desired_yaw = math.atan2(target_y - current_y, target_x - current_x)
+        yaw_error = pi_2_pi(desired_yaw - current_yaw)
+
+        # Control outputs
+        steering_angle = kp_yaw * yaw_error
+        steering_angle = max(-MAX_STEER, min(MAX_STEER, steering_angle))
+
+        vel_error = target_v - current_v
+        acceleration = kp_vel * vel_error
+        acceleration = max(-MAX_ACCEL, min(MAX_ACCEL, acceleration))
+
+        return steering_angle, acceleration
 
     def timer_callback(self):
         """Timer callback for MPC control loop"""
         # Check if robot odometry is available and initialized
-        if (self.robot_odom is None or 
-            not hasattr(self.robot_odom, 'pose') or 
-            self.robot_odom.pose is None or 
-            self.robot_odom.pose.pose is None):
+        if (
+            self.robot_odom is None
+            or not hasattr(self.robot_odom, "pose")
+            or self.robot_odom.pose is None
+            or self.robot_odom.pose.pose is None
+        ):
             self.get_logger().debug("Waiting for odometry data...")
             return
 
@@ -290,35 +447,60 @@ class MPCNode(Node):
         x = robot_odom.pose.pose.position.x
         y = robot_odom.pose.pose.position.y
         orientation_q = robot_odom.pose.pose.orientation
-        (_, _, yaw) = euler_from_quaternion([orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w])
+        (_, _, yaw) = euler_from_quaternion(
+            [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
+        )
         v = robot_odom.twist.twist.linear.x
 
         return State(x=x, y=y, yaw=yaw, v=v)
 
     def pub_cmd_vel(self, di, ai):
+        """Publish command velocity with safety limits"""
+        # ADDED: Safety limits and smoother control
         self.linear_x = self.linear_x + ai * DT  # Update linear velocity
+
+        # Apply safety limits
+        self.linear_x = max(MIN_LINEAR_VEL, min(MAX_LINEAR_VEL, self.linear_x))
+
         msg = Twist()
         msg.linear.x = self.linear_x
-        msg.angular.z = self.linear_x * math.tan(di) / self.l  # Convert steering angle to angular velocity
+
+        # Calculate angular velocity with safety limits
+        angular_z = self.linear_x * math.tan(di) / self.l
+        angular_z = max(MIN_ANGULAR_VEL, min(MAX_ANGULAR_VEL, angular_z))
+        msg.angular.z = angular_z
+
         self.cmd_vel_pub.publish(msg)
+
+    def pub_emergency_stop(self):
+        """Publish emergency stop command"""
+        msg = Twist()
+        msg.linear.x = 0.0
+        msg.angular.z = 0.0
+        self.cmd_vel_pub.publish(msg)
+        self.linear_x = 0.0
+
 
 def main(args=None):
     try:
         rclpy.init(args=args)
         node = MPCNode()
-        
+
         if node.path is None:
-            node.get_logger().error("Failed to initialize MPC controller - no valid path")
+            node.get_logger().error(
+                "Failed to initialize MPC controller - no valid path"
+            )
             return
-            
+
         node.get_logger().info("MPC controller started successfully")
         rclpy.spin(node)
-        
+
     except KeyboardInterrupt:
         node.get_logger().info("MPC controller stopped by user")
     except Exception as e:
         print(f"Error starting MPC controller: {e}")
         import traceback
+
         traceback.print_exc()
     finally:
         try:
@@ -327,5 +509,6 @@ def main(args=None):
         except:
             pass
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

@@ -12,11 +12,11 @@ NX = 4  # x = x, y, v, yaw
 NU = 2  # a = [accel, steer]
 T = 5  # horizon length
 
-# mpc parameters
-R = np.diag([0.01, 0.01])  # input cost matrix
-Rd = np.diag([0.01, 1.0])  # input difference cost matrix
-Q = np.diag([1.0, 1.0, 0.5, 0.5])  # state cost matrix
-Qf = Q  # state final matrix
+# mpc parameters - TUNED for better performance
+R = np.diag([0.1, 0.1])  # input cost matrix - increased to penalize aggressive control
+Rd = np.diag([0.01, 0.5])  # input difference cost matrix - reduced steering penalty
+Q = np.diag([10.0, 10.0, 1.0, 2.0])  # state cost matrix - prioritize position tracking
+Qf = np.diag([15.0, 15.0, 1.0, 3.0])  # state final matrix - higher final cost
 GOAL_DIS = 1.5  # goal distance
 STOP_SPEED = 0.5 / 3.6  # stop speed
 MAX_TIME = 500.0  # max simulation time
@@ -43,17 +43,18 @@ WHEEL_RADIUS = 0.045  # [m]
 WHEEL_BASE = 0.2  # [m]
 TRACK_WIDTH = 0.14  # [m] track width
 
-MAX_STEER = math.radians(10.0)  # maximum steering angle [rad]
-MAX_DSTEER = math.radians(5.0)  # maximum steering speed [rad/s]
-MAX_SPEED = 1.0  # maximum speed [m/s]
-MIN_SPEED = 1.0  # minimum speed [m/s]
-MAX_ACCEL = 0.5  # maximum accel [m/ss]
-MAX_LINEAR_VEL = 1.0  # maximum linear velocity [m/s]
-MIN_LINEAR_VEL = -1.0  # minimum linear velocity [m/s]
-MAX_ANGULAR_VEL = math.radians(5)  # maximum angular velocity [rad/s]
-MIN_ANGULAR_VEL = -math.radians(5)  # minimum angular velocity [rad/s]
+MAX_STEER = math.radians(25.0)  # maximum steering angle [rad] - increased from 10°
+MAX_DSTEER = math.radians(10.0)  # maximum steering speed [rad/s] - increased from 5°
+MAX_SPEED = 1.5  # maximum speed [m/s] - increased from 1.0
+MIN_SPEED = -0.5  # minimum speed [m/s] - less aggressive reverse
+MAX_ACCEL = 1.0  # maximum accel [m/ss] - increased from 0.5
+MAX_LINEAR_VEL = 1.5  # maximum linear velocity [m/s]
+MIN_LINEAR_VEL = -0.5  # minimum linear velocity [m/s]
+MAX_ANGULAR_VEL = math.radians(15)  # maximum angular velocity [rad/s] - increased
+MIN_ANGULAR_VEL = -math.radians(15)  # minimum angular velocity [rad/s]
 
 show_animation = True
+
 
 class State:
     """
@@ -67,6 +68,7 @@ class State:
         self.v = v
         self.predelta = None
 
+
 def pi_2_pi(angle):
     return angle_mod(angle)
 
@@ -79,7 +81,7 @@ def get_linear_model_matrix(v, phi, delta):
     A[2, 2] = 1.0
     A[3, 3] = 1.0
     A[0, 2] = DT * math.cos(phi)
-    A[0, 3] = - DT * v * math.sin(phi)
+    A[0, 3] = -DT * v * math.sin(phi)
     A[1, 2] = DT * math.sin(phi)
     A[1, 3] = DT * v * math.cos(phi)
     A[3, 2] = DT * math.tan(delta) / WB
@@ -90,66 +92,10 @@ def get_linear_model_matrix(v, phi, delta):
 
     C = np.zeros(NX)
     C[0] = DT * v * math.sin(phi) * phi
-    C[1] = - DT * v * math.cos(phi) * phi
-    C[3] = - DT * v * delta / (WB * math.cos(delta) ** 2)
+    C[1] = -DT * v * math.cos(phi) * phi
+    C[3] = -DT * v * delta / (WB * math.cos(delta) ** 2)
 
     return A, B, C
-
-
-# def plot_car(x, y, yaw, steer=0.0, cabcolor="-r", truckcolor="-k"):  # pragma: no cover
-
-#     outline = np.array([[-BACKTOWHEEL, (LENGTH - BACKTOWHEEL), (LENGTH - BACKTOWHEEL), -BACKTOWHEEL, -BACKTOWHEEL],
-#                         [WIDTH / 2, WIDTH / 2, - WIDTH / 2, -WIDTH / 2, WIDTH / 2]])
-
-#     fr_wheel = np.array([[WHEEL_LEN, -WHEEL_LEN, -WHEEL_LEN, WHEEL_LEN, WHEEL_LEN],
-#                          [-WHEEL_WIDTH - TREAD, -WHEEL_WIDTH - TREAD, WHEEL_WIDTH - TREAD, WHEEL_WIDTH - TREAD, -WHEEL_WIDTH - TREAD]])
-
-#     rr_wheel = np.copy(fr_wheel)
-
-#     fl_wheel = np.copy(fr_wheel)
-#     fl_wheel[1, :] *= -1
-#     rl_wheel = np.copy(rr_wheel)
-#     rl_wheel[1, :] *= -1
-
-#     Rot1 = np.array([[math.cos(yaw), math.sin(yaw)],
-#                      [-math.sin(yaw), math.cos(yaw)]])
-#     Rot2 = np.array([[math.cos(steer), math.sin(steer)],
-#                      [-math.sin(steer), math.cos(steer)]])
-
-#     fr_wheel = (fr_wheel.T.dot(Rot2)).T
-#     fl_wheel = (fl_wheel.T.dot(Rot2)).T
-#     fr_wheel[0, :] += WB
-#     fl_wheel[0, :] += WB
-
-#     fr_wheel = (fr_wheel.T.dot(Rot1)).T
-#     fl_wheel = (fl_wheel.T.dot(Rot1)).T
-
-#     outline = (outline.T.dot(Rot1)).T
-#     rr_wheel = (rr_wheel.T.dot(Rot1)).T
-#     rl_wheel = (rl_wheel.T.dot(Rot1)).T
-
-#     outline[0, :] += x
-#     outline[1, :] += y
-#     fr_wheel[0, :] += x
-#     fr_wheel[1, :] += y
-#     rr_wheel[0, :] += x
-#     rr_wheel[1, :] += y
-#     fl_wheel[0, :] += x
-#     fl_wheel[1, :] += y
-#     rl_wheel[0, :] += x
-#     rl_wheel[1, :] += y
-
-#     plt.plot(np.array(outline[0, :]).flatten(),
-#              np.array(outline[1, :]).flatten(), truckcolor)
-#     plt.plot(np.array(fr_wheel[0, :]).flatten(),
-#              np.array(fr_wheel[1, :]).flatten(), truckcolor)
-#     plt.plot(np.array(rr_wheel[0, :]).flatten(),
-#              np.array(rr_wheel[1, :]).flatten(), truckcolor)
-#     plt.plot(np.array(fl_wheel[0, :]).flatten(),
-#              np.array(fl_wheel[1, :]).flatten(), truckcolor)
-#     plt.plot(np.array(rl_wheel[0, :]).flatten(),
-#              np.array(rl_wheel[1, :]).flatten(), truckcolor)
-#     plt.plot(x, y, "*")
 
 
 def update_state(state, a, delta):
@@ -179,10 +125,10 @@ def get_nparray_from_matrix(x):
 
 def calc_nearest_index(state, cx, cy, cyaw, pind):
 
-    dx = [state.x - icx for icx in cx[pind:(pind + N_IND_SEARCH)]]
-    dy = [state.y - icy for icy in cy[pind:(pind + N_IND_SEARCH)]]
+    dx = [state.x - icx for icx in cx[pind : (pind + N_IND_SEARCH)]]
+    dy = [state.y - icy for icy in cy[pind : (pind + N_IND_SEARCH)]]
 
-    d = [idx ** 2 + idy ** 2 for (idx, idy) in zip(dx, dy)]
+    d = [idx**2 + idy**2 for (idx, idy) in zip(dx, dy)]
 
     mind = min(d)
 
@@ -206,7 +152,7 @@ def predict_motion(x0, oa, od, xref):
         xbar[i, 0] = x0[i]
 
     state = State(x=x0[0], y=x0[1], yaw=x0[3], v=x0[2])
-    for (ai, di, i) in zip(oa, od, range(1, T + 1)):
+    for ai, di, i in zip(oa, od, range(1, T + 1)):
         state = update_state(state, ai, di)
         xbar[0, i] = state.x
         xbar[1, i] = state.y
@@ -230,7 +176,30 @@ def iterative_linear_mpc_control(xref, x0, dref, oa, od):
         xbar = predict_motion(x0, oa, od, xref)
         poa, pod = oa[:], od[:]
         oa, od, ox, oy, oyaw, ov = linear_mpc_control(xref, xbar, x0, dref)
-        du = sum(abs(oa - poa)) + sum(abs(od - pod))  # calc u change value
+
+        # FIXED: Add proper error handling for failed optimization
+        if oa is None or od is None:
+            print(f"MPC solver failed at iteration {i}")
+            # Return previous values or zero control inputs
+            if i == 0:
+                oa = [0.0] * T
+                od = [0.0] * T
+                ox = [x0[0]] * (T + 1)
+                oy = [x0[1]] * (T + 1)
+                oyaw = [x0[3]] * (T + 1)
+                ov = [x0[2]] * (T + 1)
+            else:
+                oa = poa
+                od = pod
+            break
+
+        # Convert to numpy arrays if needed for arithmetic operations
+        oa_array = np.array(oa)
+        od_array = np.array(od)
+        poa_array = np.array(poa)
+        pod_array = np.array(pod)
+
+        du = np.sum(np.abs(oa_array - poa_array)) + np.sum(np.abs(od_array - pod_array))
         if du <= DU_TH:
             break
     else:
@@ -261,36 +230,61 @@ def linear_mpc_control(xref, xbar, x0, dref):
         if t != 0:
             cost += cvxpy.quad_form(xref[:, t] - x[:, t], Q)
 
-        A, B, C = get_linear_model_matrix(
-            xbar[2, t], xbar[3, t], dref[0, t])
+        A, B, C = get_linear_model_matrix(xbar[2, t], xbar[3, t], dref[0, t])
         constraints += [x[:, t + 1] == A @ x[:, t] + B @ u[:, t] + C]
 
         if t < (T - 1):
             cost += cvxpy.quad_form(u[:, t + 1] - u[:, t], Rd)
-            constraints += [cvxpy.abs(u[1, t + 1] - u[1, t]) <=
-                            MAX_DSTEER * DT]
+            constraints += [cvxpy.abs(u[1, t + 1] - u[1, t]) <= MAX_DSTEER * DT]
 
     cost += cvxpy.quad_form(xref[:, T] - x[:, T], Qf)
 
     constraints += [x[:, 0] == x0]
-    constraints += [x[2, :] <= MAX_SPEED]
-    constraints += [x[2, :] >= MIN_SPEED]
-    constraints += [cvxpy.abs(u[0, :]) <= MAX_ACCEL]
-    constraints += [cvxpy.abs(u[1, :]) <= MAX_STEER]
+
+    # RELAXED CONSTRAINTS - made less restrictive to avoid infeasibility
+    constraints += [x[2, :] <= MAX_SPEED * 1.1]  # 10% tolerance on max speed
+    constraints += [x[2, :] >= MIN_SPEED * 1.1]  # 10% tolerance on min speed
+    constraints += [
+        cvxpy.abs(u[0, :]) <= MAX_ACCEL * 1.2
+    ]  # 20% tolerance on acceleration
+    constraints += [cvxpy.abs(u[1, :]) <= MAX_STEER * 1.1]  # 10% tolerance on steering
 
     prob = cvxpy.Problem(cvxpy.Minimize(cost), constraints)
-    prob.solve(solver=cvxpy.CLARABEL, verbose=False)
 
-    if prob.status == cvxpy.OPTIMAL or prob.status == cvxpy.OPTIMAL_INACCURATE:
+    # IMPROVED SOLVER CONFIGURATION
+    solvers_to_try = [
+        (
+            cvxpy.OSQP,
+            {"max_iter": 2000, "eps_abs": 1e-3, "eps_rel": 1e-3, "adaptive_rho": True},
+        ),
+        (cvxpy.CLARABEL, {"max_iter": 1000, "tol_gap_abs": 1e-3, "tol_gap_rel": 1e-3}),
+        (cvxpy.SCS, {"max_iters": 2000, "eps": 1e-3, "adaptive_scale": True}),
+        (cvxpy.ECOS, {"max_iters": 1000, "abstol": 1e-3, "reltol": 1e-3}),
+    ]
+
+    solved = False
+    for solver, params in solvers_to_try:
+        try:
+            prob.solve(solver=solver, verbose=False, **params)
+
+            if prob.status == cvxpy.OPTIMAL or prob.status == cvxpy.OPTIMAL_INACCURATE:
+                solved = True
+                break
+            else:
+                print(f"Solver {solver} failed with status: {prob.status}")
+        except Exception as e:
+            print(f"Solver {solver} encountered error: {e}")
+            continue
+
+    if solved:
         ox = get_nparray_from_matrix(x.value[0, :])
         oy = get_nparray_from_matrix(x.value[1, :])
         ov = get_nparray_from_matrix(x.value[2, :])
         oyaw = get_nparray_from_matrix(x.value[3, :])
         oa = get_nparray_from_matrix(u.value[0, :])
         odelta = get_nparray_from_matrix(u.value[1, :])
-
     else:
-        print("Error: Cannot solve mpc..")
+        print("Error: Cannot solve mpc with any available solver")
         oa, odelta, ox, oy, oyaw, ov = None, None, None, None, None, None
 
     return oa, odelta, ox, oy, oyaw, ov
@@ -301,33 +295,42 @@ def calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, pind):
     dref = np.zeros((1, T + 1))
     ncourse = len(cx)
 
-    ind, _ = calc_nearest_index(state, cx, cy, cyaw, pind)
+    ind, cross_track_error = calc_nearest_index(state, cx, cy, cyaw, pind)
+
+    # IMPROVED: Better handling when robot is far from path
+    if abs(cross_track_error) > 2.0:  # If robot is more than 2m away from path
+        print(f"Warning: Large cross-track error: {cross_track_error:.3f}m")
+        # Gradually reduce target speed when far from path
+        speed_reduction = min(0.8, abs(cross_track_error) / 5.0)
+        target_speed_factor = 1.0 - speed_reduction
+    else:
+        target_speed_factor = 1.0
 
     if pind >= ind:
         ind = pind
 
     xref[0, 0] = cx[ind]
     xref[1, 0] = cy[ind]
-    xref[2, 0] = sp[ind]
+    xref[2, 0] = sp[ind] * target_speed_factor
     xref[3, 0] = cyaw[ind]
     dref[0, 0] = 0.0  # steer operational point should be 0
 
     travel = 0.0
 
-    for i in range(T + 1):
+    for i in range(1, T + 1):  # Start from 1, not 0
         travel += abs(state.v) * DT
         dind = int(round(travel / dl))
 
         if (ind + dind) < ncourse:
             xref[0, i] = cx[ind + dind]
             xref[1, i] = cy[ind + dind]
-            xref[2, i] = sp[ind + dind]
+            xref[2, i] = sp[ind + dind] * target_speed_factor
             xref[3, i] = cyaw[ind + dind]
             dref[0, i] = 0.0
         else:
             xref[0, i] = cx[ncourse - 1]
             xref[1, i] = cy[ncourse - 1]
-            xref[2, i] = sp[ncourse - 1]
+            xref[2, i] = sp[ncourse - 1] * target_speed_factor
             xref[3, i] = cyaw[ncourse - 1]
             dref[0, i] = 0.0
 
@@ -341,12 +344,12 @@ def check_goal(state, goal, tind, nind):
     dy = state.y - goal[1]
     d = math.hypot(dx, dy)
 
-    isgoal = (d <= GOAL_DIS)
+    isgoal = d <= GOAL_DIS
 
     if abs(tind - nind) >= 5:
         isgoal = False
 
-    isstop = (abs(state.v) <= STOP_SPEED)
+    isstop = abs(state.v) <= STOP_SPEED
 
     if isgoal and isstop:
         return True
@@ -374,7 +377,7 @@ def calc_speed_profile(cx, cy, cyaw, target_speed):
                 direction = 1.0
 
         if direction != 1.0:
-            speed_profile[i] = - target_speed
+            speed_profile[i] = -target_speed
         else:
             speed_profile[i] = target_speed
 
@@ -402,9 +405,9 @@ def smooth_yaw(yaw):
 def load_path_from_yaml(yaml_file):
     """
     Load path from YAML file (manual parsing without yaml library)
-    
+
     yaml_file: path to the YAML file containing path data
-    
+
     Returns:
     cx: x coordinates list
     cy: y coordinates list
@@ -412,49 +415,59 @@ def load_path_from_yaml(yaml_file):
     ck: curvature list (calculated from path)
     """
     try:
-        with open(yaml_file, 'r') as file:
+        with open(yaml_file, "r") as file:
             lines = file.readlines()
-        
+
         cx = []
         cy = []
         cyaw = []
-        
+
         # Parse each line manually
         current_point = {}
         for line in lines:
             line = line.strip()
-            if line.startswith('- x:'):
+            if line.startswith("- x:"):
                 # New point starts
-                if current_point and 'x' in current_point and 'y' in current_point and 'yaw' in current_point:
-                    cx.append(current_point['x'])
-                    cy.append(current_point['y'])
-                    cyaw.append(current_point['yaw'])
+                if (
+                    current_point
+                    and "x" in current_point
+                    and "y" in current_point
+                    and "yaw" in current_point
+                ):
+                    cx.append(current_point["x"])
+                    cy.append(current_point["y"])
+                    cyaw.append(current_point["yaw"])
                 current_point = {}
                 # Extract x value
-                x_val = float(line.split('x:')[1].strip())
-                current_point['x'] = x_val
-            elif line.startswith('y:'):
+                x_val = float(line.split("x:")[1].strip())
+                current_point["x"] = x_val
+            elif line.startswith("y:"):
                 # Extract y value
-                y_val = float(line.split('y:')[1].strip())
-                current_point['y'] = y_val
-            elif line.startswith('yaw:'):
+                y_val = float(line.split("y:")[1].strip())
+                current_point["y"] = y_val
+            elif line.startswith("yaw:"):
                 # Extract yaw value
-                yaw_val = float(line.split('yaw:')[1].strip())
-                current_point['yaw'] = yaw_val
-        
+                yaw_val = float(line.split("yaw:")[1].strip())
+                current_point["yaw"] = yaw_val
+
         # Don't forget the last point
-        if current_point and 'x' in current_point and 'y' in current_point and 'yaw' in current_point:
-            cx.append(current_point['x'])
-            cy.append(current_point['y'])
-            cyaw.append(current_point['yaw'])
-        
+        if (
+            current_point
+            and "x" in current_point
+            and "y" in current_point
+            and "yaw" in current_point
+        ):
+            cx.append(current_point["x"])
+            cy.append(current_point["y"])
+            cyaw.append(current_point["yaw"])
+
         # Calculate curvature (simplified - set to zero for now)
         ck = [0.0] * len(cx)
-        
+
         print(f"Loaded path with {len(cx)} points from {yaml_file}")
-        
+
         return cx, cy, cyaw, ck
-        
+
     except FileNotFoundError:
         print(f"Error: Could not find file {yaml_file}")
         return None, None, None, None
@@ -469,13 +482,13 @@ def calculate_path_distance(cx, cy):
     """
     if len(cx) < 2:
         return 1.0
-    
+
     total_distance = 0.0
     for i in range(len(cx) - 1):
         dx = cx[i + 1] - cx[i]
         dy = cy[i + 1] - cy[i]
-        total_distance += math.sqrt(dx*dx + dy*dy)
-    
+        total_distance += math.sqrt(dx * dx + dy * dy)
+
     # Average distance between points
     dl = total_distance / (len(cx) - 1)
     return dl
@@ -484,8 +497,7 @@ def calculate_path_distance(cx, cy):
 def get_straight_course(dl):
     ax = [0.0, 5.0, 10.0, 20.0, 30.0, 40.0, 50.0]
     ay = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(
-        ax, ay, ds=dl)
+    cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(ax, ay, ds=dl)
 
     return cx, cy, cyaw, ck
 
@@ -493,8 +505,7 @@ def get_straight_course(dl):
 def get_straight_course2(dl):
     ax = [0.0, -10.0, -20.0, -40.0, -50.0, -60.0, -70.0]
     ay = [0.0, -1.0, 1.0, 0.0, -1.0, 1.0, 0.0]
-    cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(
-        ax, ay, ds=dl)
+    cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(ax, ay, ds=dl)
 
     return cx, cy, cyaw, ck
 
@@ -502,8 +513,7 @@ def get_straight_course2(dl):
 def get_straight_course3(dl):
     ax = [0.0, -10.0, -20.0, -40.0, -50.0, -60.0, -70.0]
     ay = [0.0, -1.0, 1.0, 0.0, -1.0, 1.0, 0.0]
-    cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(
-        ax, ay, ds=dl)
+    cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(ax, ay, ds=dl)
 
     cyaw = [i - math.pi for i in cyaw]
 
@@ -513,8 +523,7 @@ def get_straight_course3(dl):
 def get_forward_course(dl):
     ax = [0.0, 60.0, 125.0, 50.0, 75.0, 30.0, -10.0]
     ay = [0.0, 0.0, 50.0, 65.0, 30.0, 50.0, -20.0]
-    cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(
-        ax, ay, ds=dl)
+    cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(ax, ay, ds=dl)
 
     return cx, cy, cyaw, ck
 
@@ -522,12 +531,10 @@ def get_forward_course(dl):
 def get_switch_back_course(dl):
     ax = [0.0, 30.0, 6.0, 20.0, 35.0]
     ay = [0.0, 0.0, 20.0, 35.0, 20.0]
-    cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(
-        ax, ay, ds=dl)
+    cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(ax, ay, ds=dl)
     ax = [35.0, 10.0, 0.0, 0.0]
     ay = [20.0, 30.0, 5.0, 0.0]
-    cx2, cy2, cyaw2, ck2, s2 = cubic_spline_planner.calc_spline_course(
-        ax, ay, ds=dl)
+    cx2, cy2, cyaw2, ck2, s2 = cubic_spline_planner.calc_spline_course(ax, ay, ds=dl)
     cyaw2 = [i - math.pi for i in cyaw2]
     cx.extend(cx2)
     cy.extend(cy2)
