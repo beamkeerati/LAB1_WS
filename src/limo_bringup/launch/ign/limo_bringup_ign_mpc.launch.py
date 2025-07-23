@@ -36,6 +36,13 @@ def generate_launch_description():
         output="screen"
     )
     
+    inv_kin = Node(
+        package="limo_controller",
+        executable="inverse_kinematics.py",
+        name="ik_node",
+        output="screen"
+    )
+    
 
     # Create the launch description and populate
     ld = LaunchDescription()
@@ -45,6 +52,6 @@ def generate_launch_description():
     ld.add_action(limo_description)
     ld.add_action(odom)
     ld.add_action(mpc)
-
+    ld.add_action(inv_kin)
 
     return ld
