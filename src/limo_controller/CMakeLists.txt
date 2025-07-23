@@ -32,6 +32,7 @@ install(PROGRAMS
   scripts/forward_kinematics.py
   scripts/pure_pursuit.py
   scripts/stanley.py
+  scripts/mpc.py
   scripts/pid.py
   scripts/gps_emulator.py
   scripts/ekf.py
