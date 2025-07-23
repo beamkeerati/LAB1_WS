@@ -8,51 +8,6 @@ import sys
 import pathlib
 from utils.angle import angle_mod
 
-NX = 4  # x = x, y, v, yaw
-NU = 2  # a = [accel, steer]
-T = 5  # horizon length
-
-# mpc parameters
-R = np.diag([0.01, 0.01])  # input cost matrix
-Rd = np.diag([0.01, 1.0])  # input difference cost matrix
-Q = np.diag([1.0, 1.0, 0.5, 0.5])  # state cost matrix
-Qf = Q  # state final matrix
-GOAL_DIS = 1.5  # goal distance
-STOP_SPEED = 0.5 / 3.6  # stop speed
-MAX_TIME = 500.0  # max simulation time
-
-# iterative paramter
-MAX_ITER = 3  # Max iteration
-DU_TH = 0.1  # iteration finish param
-
-TARGET_SPEED = 1.0  # [m/s] target speed
-N_IND_SEARCH = 10  # Search index number
-
-DT = 0.01  # [s] time tick
-
-# Vehicle parameters
-LENGTH = 4.5  # [m]
-WIDTH = 2.0  # [m]
-BACKTOWHEEL = 1.0  # [m]
-WHEEL_LEN = 0.3  # [m]
-WHEEL_WIDTH = 0.2  # [m]
-TREAD = 0.7  # [m]
-WB = 0.2  # [m]
-
-WHEEL_RADIUS = 0.045  # [m]
-WHEEL_BASE = 0.2  # [m]
-TRACK_WIDTH = 0.14  # [m] track width
-
-MAX_STEER = math.radians(10.0)  # maximum steering angle [rad]
-MAX_DSTEER = math.radians(5.0)  # maximum steering speed [rad/s]
-MAX_SPEED = 1.0  # maximum speed [m/s]
-MIN_SPEED = -1.0  # minimum speed [m/s] - FIXED: was 1.0, should allow reverse
-MAX_ACCEL = 0.5  # maximum accel [m/ss]
-MAX_LINEAR_VEL = 1.0  # maximum linear velocity [m/s]
-MIN_LINEAR_VEL = -1.0  # minimum linear velocity [m/s]
-MAX_ANGULAR_VEL = math.radians(5)  # maximum angular velocity [rad/s]
-MIN_ANGULAR_VEL = -math.radians(5)  # minimum angular velocity [rad/s]
-
 show_animation = True
 
 
@@ -73,48 +28,52 @@ def pi_2_pi(angle):
     return angle_mod(angle)
 
 
-def get_linear_model_matrix(v, phi, delta):
-
-    A = np.zeros((NX, NX))
+def get_linear_model_matrix(v, phi, delta, config):
+    """
+    Get linear model matrix with configurable parameters
+    """
+    A = np.zeros((config.NX, config.NX))
     A[0, 0] = 1.0
     A[1, 1] = 1.0
     A[2, 2] = 1.0
     A[3, 3] = 1.0
-    A[0, 2] = DT * math.cos(phi)
-    A[0, 3] = -DT * v * math.sin(phi)
-    A[1, 2] = DT * math.sin(phi)
-    A[1, 3] = DT * v * math.cos(phi)
-    A[3, 2] = DT * math.tan(delta) / WB
+    A[0, 2] = config.DT * math.cos(phi)
+    A[0, 3] = -config.DT * v * math.sin(phi)
+    A[1, 2] = config.DT * math.sin(phi)
+    A[1, 3] = config.DT * v * math.cos(phi)
+    A[3, 2] = config.DT * math.tan(delta) / config.WB
 
-    B = np.zeros((NX, NU))
-    B[2, 0] = DT
-    B[3, 1] = DT * v / (WB * math.cos(delta) ** 2)
+    B = np.zeros((config.NX, config.NU))
+    B[2, 0] = config.DT
+    B[3, 1] = config.DT * v / (config.WB * math.cos(delta) ** 2)
 
-    C = np.zeros(NX)
-    C[0] = DT * v * math.sin(phi) * phi
-    C[1] = -DT * v * math.cos(phi) * phi
-    C[3] = -DT * v * delta / (WB * math.cos(delta) ** 2)
+    C = np.zeros(config.NX)
+    C[0] = config.DT * v * math.sin(phi) * phi
+    C[1] = -config.DT * v * math.cos(phi) * phi
+    C[3] = -config.DT * v * delta / (config.WB * math.cos(delta) ** 2)
 
     return A, B, C
 
 
-def update_state(state, a, delta):
-
+def update_state(state, a, delta, config):
+    """
+    Update state with configurable parameters
+    """
     # input check
-    if delta >= MAX_STEER:
-        delta = MAX_STEER
-    elif delta <= -MAX_STEER:
-        delta = -MAX_STEER
+    if delta >= config.MAX_STEER:
+        delta = config.MAX_STEER
+    elif delta <= -config.MAX_STEER:
+        delta = -config.MAX_STEER
 
-    state.x = state.x + state.v * math.cos(state.yaw) * DT
-    state.y = state.y + state.v * math.sin(state.yaw) * DT
-    state.yaw = state.yaw + state.v / WB * math.tan(delta) * DT
-    state.v = state.v + a * DT
+    state.x = state.x + state.v * math.cos(state.yaw) * config.DT
+    state.y = state.y + state.v * math.sin(state.yaw) * config.DT
+    state.yaw = state.yaw + state.v / config.WB * math.tan(delta) * config.DT
+    state.v = state.v + a * config.DT
 
-    if state.v > MAX_SPEED:
-        state.v = MAX_SPEED
-    elif state.v < MIN_SPEED:
-        state.v = MIN_SPEED
+    if state.v > config.MAX_SPEED:
+        state.v = config.MAX_SPEED
+    elif state.v < config.MIN_SPEED:
+        state.v = config.MIN_SPEED
 
     return state
 
@@ -123,10 +82,12 @@ def get_nparray_from_matrix(x):
     return np.array(x).flatten()
 
 
-def calc_nearest_index(state, cx, cy, cyaw, pind):
-
-    dx = [state.x - icx for icx in cx[pind : (pind + N_IND_SEARCH)]]
-    dy = [state.y - icy for icy in cy[pind : (pind + N_IND_SEARCH)]]
+def calc_nearest_index(state, cx, cy, cyaw, pind, config):
+    """
+    Calculate nearest index with configurable search parameters
+    """
+    dx = [state.x - icx for icx in cx[pind : (pind + config.N_IND_SEARCH)]]
+    dy = [state.y - icy for icy in cy[pind : (pind + config.N_IND_SEARCH)]]
 
     d = [idx**2 + idy**2 for (idx, idy) in zip(dx, dy)]
 
@@ -146,14 +107,17 @@ def calc_nearest_index(state, cx, cy, cyaw, pind):
     return ind, mind
 
 
-def predict_motion(x0, oa, od, xref):
+def predict_motion(x0, oa, od, xref, config):
+    """
+    Predict motion with configurable parameters
+    """
     xbar = xref * 0.0
     for i, _ in enumerate(x0):
         xbar[i, 0] = x0[i]
 
     state = State(x=x0[0], y=x0[1], yaw=x0[3], v=x0[2])
-    for ai, di, i in zip(oa, od, range(1, T + 1)):
-        state = update_state(state, ai, di)
+    for ai, di, i in zip(oa, od, range(1, config.T + 1)):
+        state = update_state(state, ai, di, config)
         xbar[0, i] = state.x
         xbar[1, i] = state.y
         xbar[2, i] = state.v
@@ -162,32 +126,32 @@ def predict_motion(x0, oa, od, xref):
     return xbar
 
 
-def iterative_linear_mpc_control(xref, x0, dref, oa, od):
+def iterative_linear_mpc_control(xref, x0, dref, oa, od, config):
     """
     MPC control with updating operational point iteratively
     """
     ox, oy, oyaw, ov = None, None, None, None
 
     if oa is None or od is None:
-        oa = [0.0] * T
-        od = [0.0] * T
+        oa = [0.0] * config.T
+        od = [0.0] * config.T
 
-    for i in range(MAX_ITER):
-        xbar = predict_motion(x0, oa, od, xref)
+    for i in range(config.MAX_ITER):
+        xbar = predict_motion(x0, oa, od, xref, config)
         poa, pod = oa[:], od[:]
-        oa, od, ox, oy, oyaw, ov = linear_mpc_control(xref, xbar, x0, dref)
+        oa, od, ox, oy, oyaw, ov = linear_mpc_control(xref, xbar, x0, dref, config)
 
-        # FIXED: Add proper error handling for failed optimization
+        # Better error handling for failed optimization
         if oa is None or od is None:
             print(f"MPC solver failed at iteration {i}")
             # Return previous values or zero control inputs
             if i == 0:
-                oa = [0.0] * T
-                od = [0.0] * T
-                ox = [x0[0]] * (T + 1)
-                oy = [x0[1]] * (T + 1)
-                oyaw = [x0[3]] * (T + 1)
-                ov = [x0[2]] * (T + 1)
+                oa = [0.0] * config.T
+                od = [0.0] * config.T
+                ox = [x0[0]] * (config.T + 1)
+                oy = [x0[1]] * (config.T + 1)
+                oyaw = [x0[3]] * (config.T + 1)
+                ov = [x0[2]] * (config.T + 1)
             else:
                 oa = poa
                 od = pod
@@ -200,7 +164,7 @@ def iterative_linear_mpc_control(xref, x0, dref, oa, od):
         pod_array = np.array(pod)
 
         du = np.sum(np.abs(oa_array - poa_array)) + np.sum(np.abs(od_array - pod_array))
-        if du <= DU_TH:
+        if du <= config.DU_TH:
             break
     else:
         print("Iterative is max iter")
@@ -208,46 +172,49 @@ def iterative_linear_mpc_control(xref, x0, dref, oa, od):
     return oa, od, ox, oy, oyaw, ov
 
 
-def linear_mpc_control(xref, xbar, x0, dref):
+def linear_mpc_control(xref, xbar, x0, dref, config):
     """
-    linear mpc control
+    Linear MPC control with configurable parameters
 
     xref: reference point
     xbar: operational point
     x0: initial state
     dref: reference steer angle
+    config: configuration object with all parameters
     """
 
-    x = cvxpy.Variable((NX, T + 1))
-    u = cvxpy.Variable((NU, T))
+    x = cvxpy.Variable((config.NX, config.T + 1))
+    u = cvxpy.Variable((config.NU, config.T))
 
     cost = 0.0
     constraints = []
 
-    for t in range(T):
-        cost += cvxpy.quad_form(u[:, t], R)
+    for t in range(config.T):
+        cost += cvxpy.quad_form(u[:, t], config.R)
 
         if t != 0:
-            cost += cvxpy.quad_form(xref[:, t] - x[:, t], Q)
+            cost += cvxpy.quad_form(xref[:, t] - x[:, t], config.Q)
 
-        A, B, C = get_linear_model_matrix(xbar[2, t], xbar[3, t], dref[0, t])
+        A, B, C = get_linear_model_matrix(xbar[2, t], xbar[3, t], dref[0, t], config)
         constraints += [x[:, t + 1] == A @ x[:, t] + B @ u[:, t] + C]
 
-        if t < (T - 1):
-            cost += cvxpy.quad_form(u[:, t + 1] - u[:, t], Rd)
-            constraints += [cvxpy.abs(u[1, t + 1] - u[1, t]) <= MAX_DSTEER * DT]
+        if t < (config.T - 1):
+            cost += cvxpy.quad_form(u[:, t + 1] - u[:, t], config.Rd)
+            constraints += [
+                cvxpy.abs(u[1, t + 1] - u[1, t]) <= config.MAX_DSTEER * config.DT
+            ]
 
-    cost += cvxpy.quad_form(xref[:, T] - x[:, T], Qf)
+    cost += cvxpy.quad_form(xref[:, config.T] - x[:, config.T], config.Qf)
 
     constraints += [x[:, 0] == x0]
-    constraints += [x[2, :] <= MAX_SPEED]
-    constraints += [x[2, :] >= MIN_SPEED]
-    constraints += [cvxpy.abs(u[0, :]) <= MAX_ACCEL]
-    constraints += [cvxpy.abs(u[1, :]) <= MAX_STEER]
+    constraints += [x[2, :] <= config.MAX_SPEED]
+    constraints += [x[2, :] >= config.MIN_SPEED]
+    constraints += [cvxpy.abs(u[0, :]) <= config.MAX_ACCEL]
+    constraints += [cvxpy.abs(u[1, :]) <= config.MAX_STEER]
 
     prob = cvxpy.Problem(cvxpy.Minimize(cost), constraints)
 
-    # FIXED: Try multiple solvers in order of preference
+    # Try multiple solvers in order of preference
     solvers_to_try = [cvxpy.CLARABEL, cvxpy.OSQP, cvxpy.SCS, cvxpy.ECOS]
 
     solved = False
@@ -291,12 +258,15 @@ def linear_mpc_control(xref, xbar, x0, dref):
     return oa, odelta, ox, oy, oyaw, ov
 
 
-def calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, pind):
-    xref = np.zeros((NX, T + 1))
-    dref = np.zeros((1, T + 1))
+def calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, pind, config):
+    """
+    Calculate reference trajectory with configurable parameters
+    """
+    xref = np.zeros((config.NX, config.T + 1))
+    dref = np.zeros((1, config.T + 1))
     ncourse = len(cx)
 
-    ind, _ = calc_nearest_index(state, cx, cy, cyaw, pind)
+    ind, _ = calc_nearest_index(state, cx, cy, cyaw, pind, config)
 
     if pind >= ind:
         ind = pind
@@ -309,8 +279,8 @@ def calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, pind):
 
     travel = 0.0
 
-    for i in range(T + 1):
-        travel += abs(state.v) * DT
+    for i in range(config.T + 1):
+        travel += abs(state.v) * config.DT
         dind = int(round(travel / dl))
 
         if (ind + dind) < ncourse:
@@ -329,19 +299,21 @@ def calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, pind):
     return xref, ind, dref
 
 
-def check_goal(state, goal, tind, nind):
-
+def check_goal(state, goal, tind, nind, config):
+    """
+    Check if goal is reached with configurable parameters
+    """
     # check goal
     dx = state.x - goal[0]
     dy = state.y - goal[1]
     d = math.hypot(dx, dy)
 
-    isgoal = d <= GOAL_DIS
+    isgoal = d <= config.GOAL_DIS
 
     if abs(tind - nind) >= 5:
         isgoal = False
 
-    isstop = abs(state.v) <= STOP_SPEED
+    isstop = abs(state.v) <= config.STOP_SPEED
 
     if isgoal and isstop:
         return True
@@ -349,8 +321,10 @@ def check_goal(state, goal, tind, nind):
     return False
 
 
-def calc_speed_profile(cx, cy, cyaw, target_speed):
-
+def calc_speed_profile(cx, cy, cyaw, target_speed, config):
+    """
+    Calculate speed profile with configurable parameters
+    """
     speed_profile = [target_speed] * len(cx)
     direction = 1.0  # forward
 
@@ -378,8 +352,10 @@ def calc_speed_profile(cx, cy, cyaw, target_speed):
     return speed_profile
 
 
-def smooth_yaw(yaw):
-
+def smooth_yaw(yaw, config):
+    """
+    Smooth yaw angles with configurable parameters
+    """
     for i in range(len(yaw) - 1):
         dyaw = yaw[i + 1] - yaw[i]
 
@@ -394,17 +370,9 @@ def smooth_yaw(yaw):
     return yaw
 
 
-def load_path_from_yaml(yaml_file):
+def load_path_from_yaml(yaml_file, config):
     """
     Load path from YAML file (manual parsing without yaml library)
-
-    yaml_file: path to the YAML file containing path data
-
-    Returns:
-    cx: x coordinates list
-    cy: y coordinates list
-    cyaw: yaw angles list
-    ck: curvature list (calculated from path)
     """
     try:
         with open(yaml_file, "r") as file:
