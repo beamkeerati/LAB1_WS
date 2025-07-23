@@ -12,11 +12,11 @@ NX = 4  # x = x, y, v, yaw
 NU = 2  # a = [accel, steer]
 T = 5  # horizon length
 
-# mpc parameters - TUNED for better performance
-R = np.diag([0.1, 0.1])  # input cost matrix - increased to penalize aggressive control
-Rd = np.diag([0.01, 0.5])  # input difference cost matrix - reduced steering penalty
-Q = np.diag([10.0, 10.0, 1.0, 2.0])  # state cost matrix - prioritize position tracking
-Qf = np.diag([15.0, 15.0, 1.0, 3.0])  # state final matrix - higher final cost
+# mpc parameters
+R = np.diag([0.01, 0.01])  # input cost matrix
+Rd = np.diag([0.01, 1.0])  # input difference cost matrix
+Q = np.diag([1.0, 1.0, 0.5, 0.5])  # state cost matrix
+Qf = Q  # state final matrix
 GOAL_DIS = 1.5  # goal distance
 STOP_SPEED = 0.5 / 3.6  # stop speed
 MAX_TIME = 500.0  # max simulation time
@@ -43,15 +43,15 @@ WHEEL_RADIUS = 0.045  # [m]
 WHEEL_BASE = 0.2  # [m]
 TRACK_WIDTH = 0.14  # [m] track width
 
-MAX_STEER = math.radians(25.0)  # maximum steering angle [rad] - increased from 10°
-MAX_DSTEER = math.radians(10.0)  # maximum steering speed [rad/s] - increased from 5°
-MAX_SPEED = 1.5  # maximum speed [m/s] - increased from 1.0
-MIN_SPEED = -0.5  # minimum speed [m/s] - less aggressive reverse
-MAX_ACCEL = 1.0  # maximum accel [m/ss] - increased from 0.5
-MAX_LINEAR_VEL = 1.5  # maximum linear velocity [m/s]
-MIN_LINEAR_VEL = -0.5  # minimum linear velocity [m/s]
-MAX_ANGULAR_VEL = math.radians(15)  # maximum angular velocity [rad/s] - increased
-MIN_ANGULAR_VEL = -math.radians(15)  # minimum angular velocity [rad/s]
+MAX_STEER = math.radians(10.0)  # maximum steering angle [rad]
+MAX_DSTEER = math.radians(5.0)  # maximum steering speed [rad/s]
+MAX_SPEED = 1.0  # maximum speed [m/s]
+MIN_SPEED = -1.0  # minimum speed [m/s] - FIXED: was 1.0, should allow reverse
+MAX_ACCEL = 0.5  # maximum accel [m/ss]
+MAX_LINEAR_VEL = 1.0  # maximum linear velocity [m/s]
+MIN_LINEAR_VEL = -1.0  # minimum linear velocity [m/s]
+MAX_ANGULAR_VEL = math.radians(5)  # maximum angular velocity [rad/s]
+MIN_ANGULAR_VEL = -math.radians(5)  # minimum angular velocity [rad/s]
 
 show_animation = True
 
@@ -240,32 +240,33 @@ def linear_mpc_control(xref, xbar, x0, dref):
     cost += cvxpy.quad_form(xref[:, T] - x[:, T], Qf)
 
     constraints += [x[:, 0] == x0]
-
-    # RELAXED CONSTRAINTS - made less restrictive to avoid infeasibility
-    constraints += [x[2, :] <= MAX_SPEED * 1.1]  # 10% tolerance on max speed
-    constraints += [x[2, :] >= MIN_SPEED * 1.1]  # 10% tolerance on min speed
-    constraints += [
-        cvxpy.abs(u[0, :]) <= MAX_ACCEL * 1.2
-    ]  # 20% tolerance on acceleration
-    constraints += [cvxpy.abs(u[1, :]) <= MAX_STEER * 1.1]  # 10% tolerance on steering
+    constraints += [x[2, :] <= MAX_SPEED]
+    constraints += [x[2, :] >= MIN_SPEED]
+    constraints += [cvxpy.abs(u[0, :]) <= MAX_ACCEL]
+    constraints += [cvxpy.abs(u[1, :]) <= MAX_STEER]
 
     prob = cvxpy.Problem(cvxpy.Minimize(cost), constraints)
 
-    # IMPROVED SOLVER CONFIGURATION
-    solvers_to_try = [
-        (
-            cvxpy.OSQP,
-            {"max_iter": 2000, "eps_abs": 1e-3, "eps_rel": 1e-3, "adaptive_rho": True},
-        ),
-        (cvxpy.CLARABEL, {"max_iter": 1000, "tol_gap_abs": 1e-3, "tol_gap_rel": 1e-3}),
-        (cvxpy.SCS, {"max_iters": 2000, "eps": 1e-3, "adaptive_scale": True}),
-        (cvxpy.ECOS, {"max_iters": 1000, "abstol": 1e-3, "reltol": 1e-3}),
-    ]
+    # FIXED: Try multiple solvers in order of preference
+    solvers_to_try = [cvxpy.CLARABEL, cvxpy.OSQP, cvxpy.SCS, cvxpy.ECOS]
 
     solved = False
-    for solver, params in solvers_to_try:
+    for solver in solvers_to_try:
         try:
-            prob.solve(solver=solver, verbose=False, **params)
+            if solver == cvxpy.CLARABEL:
+                prob.solve(solver=solver, verbose=False, max_iter=1000)
+            elif solver == cvxpy.OSQP:
+                prob.solve(
+                    solver=solver,
+                    verbose=False,
+                    max_iter=1000,
+                    eps_abs=1e-4,
+                    eps_rel=1e-4,
+                )
+            elif solver == cvxpy.SCS:
+                prob.solve(solver=solver, verbose=False, max_iters=1000, eps=1e-4)
+            else:
+                prob.solve(solver=solver, verbose=False)
 
             if prob.status == cvxpy.OPTIMAL or prob.status == cvxpy.OPTIMAL_INACCURATE:
                 solved = True
@@ -295,42 +296,33 @@ def calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, pind):
     dref = np.zeros((1, T + 1))
     ncourse = len(cx)
 
-    ind, cross_track_error = calc_nearest_index(state, cx, cy, cyaw, pind)
-
-    # IMPROVED: Better handling when robot is far from path
-    if abs(cross_track_error) > 2.0:  # If robot is more than 2m away from path
-        print(f"Warning: Large cross-track error: {cross_track_error:.3f}m")
-        # Gradually reduce target speed when far from path
-        speed_reduction = min(0.8, abs(cross_track_error) / 5.0)
-        target_speed_factor = 1.0 - speed_reduction
-    else:
-        target_speed_factor = 1.0
+    ind, _ = calc_nearest_index(state, cx, cy, cyaw, pind)
 
     if pind >= ind:
         ind = pind
 
     xref[0, 0] = cx[ind]
     xref[1, 0] = cy[ind]
-    xref[2, 0] = sp[ind] * target_speed_factor
+    xref[2, 0] = sp[ind]
     xref[3, 0] = cyaw[ind]
     dref[0, 0] = 0.0  # steer operational point should be 0
 
     travel = 0.0
 
-    for i in range(1, T + 1):  # Start from 1, not 0
+    for i in range(T + 1):
         travel += abs(state.v) * DT
         dind = int(round(travel / dl))
 
         if (ind + dind) < ncourse:
             xref[0, i] = cx[ind + dind]
             xref[1, i] = cy[ind + dind]
-            xref[2, i] = sp[ind + dind] * target_speed_factor
+            xref[2, i] = sp[ind + dind]
             xref[3, i] = cyaw[ind + dind]
             dref[0, i] = 0.0
         else:
             xref[0, i] = cx[ncourse - 1]
             xref[1, i] = cy[ncourse - 1]
-            xref[2, i] = sp[ncourse - 1] * target_speed_factor
+            xref[2, i] = sp[ncourse - 1]
             xref[3, i] = cyaw[ncourse - 1]
             dref[0, i] = 0.0
 

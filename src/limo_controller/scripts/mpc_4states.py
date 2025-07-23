@@ -277,7 +277,6 @@ class MPCNode(Node):
         # Update current state from odometry
         try:
             self.current_state = self.get_state(self.robot_odom)
-            self.state = self.current_state  # Update MPC state with real odometry
         except Exception as e:
             self.get_logger().error(f"Error reading odometry: {e}")
             return
@@ -293,9 +292,6 @@ class MPCNode(Node):
                 self.dl,
                 self.target_ind,
             )
-
-            # ADDED: Detailed logging for analysis
-            self.log_tracking_errors(xref)
 
             x0 = [
                 self.state.x,
@@ -323,104 +319,21 @@ class MPCNode(Node):
                     self.pub_emergency_stop()
                     return
 
-                # Use simple proportional control as fallback
-                di, ai = self.simple_control_fallback(xref)
+                # Use previous control inputs or safe defaults
+                di, ai = 0.0, -0.1  # Small deceleration to slow down
             else:
                 # Reset failure count on successful solve
                 self.mpc_failed_count = 0
                 di, ai = self.odelta[0], self.oa[0]
-                self.get_logger().debug(f"MPC success: ai={ai:.3f}, di={di:.3f}")
 
             self.pub_cmd_vel(di, ai)  # Publish command velocity
+
+            # self.state = update_state(self.state, ai, di) # In Simulation
+            self.state = self.get_state(self.robot_odom)
 
         except Exception as e:
             self.get_logger().error(f"Error in MPC control: {e}")
             self.pub_emergency_stop()
-
-    def log_tracking_errors(self, xref):
-        """Log detailed tracking errors for parameter tuning analysis"""
-        if self.target_ind < len(self.cx):
-            # Current position
-            current_x = self.state.x
-            current_y = self.state.y
-            current_yaw = self.state.yaw
-            current_v = self.state.v
-
-            # Target position (reference trajectory first point)
-            target_x = xref[0, 0]
-            target_y = xref[1, 0]
-            target_v = xref[2, 0]
-            target_yaw = xref[3, 0]
-
-            # Calculate errors
-            pos_error = math.sqrt(
-                (current_x - target_x) ** 2 + (current_y - target_y) ** 2
-            )
-            yaw_error = abs(pi_2_pi(current_yaw - target_yaw))
-            vel_error = abs(current_v - target_v)
-
-            # Path following error (cross-track error)
-            nearest_path_x = self.cx[self.target_ind]
-            nearest_path_y = self.cy[self.target_ind]
-            cross_track_error = math.sqrt(
-                (current_x - nearest_path_x) ** 2 + (current_y - nearest_path_y) ** 2
-            )
-
-            # Log every 100 cycles to avoid spam
-            if hasattr(self, "log_counter"):
-                self.log_counter += 1
-            else:
-                self.log_counter = 0
-
-            if self.log_counter % 100 == 0:
-                self.get_logger().info(
-                    f"Tracking Errors - Position: {pos_error:.3f}m, CrossTrack: {cross_track_error:.3f}m, "
-                    f"Yaw: {math.degrees(yaw_error):.1f}deg, Velocity: {vel_error:.3f}m/s"
-                )
-                self.get_logger().info(
-                    f"Current State - X: {current_x:.3f}, Y: {current_y:.3f}, "
-                    f"Yaw: {math.degrees(current_yaw):.1f}deg, V: {current_v:.3f}m/s"
-                )
-                self.get_logger().info(
-                    f"Target State - X: {target_x:.3f}, Y: {target_y:.3f}, "
-                    f"Yaw: {math.degrees(target_yaw):.1f}deg, V: {target_v:.3f}m/s"
-                )
-
-    def simple_control_fallback(self, xref):
-        """Simple proportional control when MPC fails"""
-        if xref is None:
-            return 0.0, -0.1
-
-        # Simple proportional control gains
-        kp_pos = 0.5
-        kp_yaw = 1.0
-        kp_vel = 1.0
-
-        # Target from reference trajectory
-        target_x = xref[0, 0]
-        target_y = xref[1, 0]
-        target_v = xref[2, 0]
-        target_yaw = xref[3, 0]
-
-        # Current state
-        current_x = self.state.x
-        current_y = self.state.y
-        current_yaw = self.state.yaw
-        current_v = self.state.v
-
-        # Calculate desired heading to target
-        desired_yaw = math.atan2(target_y - current_y, target_x - current_x)
-        yaw_error = pi_2_pi(desired_yaw - current_yaw)
-
-        # Control outputs
-        steering_angle = kp_yaw * yaw_error
-        steering_angle = max(-MAX_STEER, min(MAX_STEER, steering_angle))
-
-        vel_error = target_v - current_v
-        acceleration = kp_vel * vel_error
-        acceleration = max(-MAX_ACCEL, min(MAX_ACCEL, acceleration))
-
-        return steering_angle, acceleration
 
     def timer_callback(self):
         """Timer callback for MPC control loop"""
