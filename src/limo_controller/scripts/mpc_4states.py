@@ -43,7 +43,7 @@ MAX_TIME = 500.0  # max simulation time
 MAX_ITER = 3  # Max iteration
 DU_TH = 0.1  # iteration finish param
 
-TARGET_SPEED = 10.0 / 3.6  # [m/s] target speed
+TARGET_SPEED = 1.0  # [m/s] target speed
 N_IND_SEARCH = 10  # Search index number
 
 DT = 0.01  # [s] time tick
@@ -62,14 +62,14 @@ WHEEL_BASE = 0.2  # [m]
 TRACK_WIDTH = 0.14  # [m] track width
 
 MAX_STEER = math.radians(10.0)  # maximum steering angle [rad]
-MAX_DSTEER = math.radians(30.0)  # maximum steering speed [rad/s]
-MAX_SPEED = 55.0 / 3.6  # maximum speed [m/s]
-MIN_SPEED = -20.0 / 3.6  # minimum speed [m/s]
-MAX_ACCEL = 1.0  # maximum accel [m/ss]
+MAX_DSTEER = math.radians(5.0)  # maximum steering speed [rad/s]
+MAX_SPEED = 1.0  # maximum speed [m/s]
+MIN_SPEED = 1.0  # minimum speed [m/s]
+MAX_ACCEL = 0.5  # maximum accel [m/ss]
 MAX_LINEAR_VEL = 1.0  # maximum linear velocity [m/s]
 MIN_LINEAR_VEL = -1.0  # minimum linear velocity [m/s]
-MAX_ANGULAR_VEL = math.radians(30.0)  # maximum angular velocity [rad/s]
-MIN_ANGULAR_VEL = -math.radians(30.0)  # minimum angular velocity [rad/s]
+MAX_ANGULAR_VEL = math.radians(5)  # maximum angular velocity [rad/s]
+MIN_ANGULAR_VEL = -math.radians(5)  # minimum angular velocity [rad/s]
 
 
 class MPCNode(Node):

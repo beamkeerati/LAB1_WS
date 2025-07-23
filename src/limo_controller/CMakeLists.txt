@@ -36,6 +36,8 @@ install(PROGRAMS
   scripts/pid.py
   scripts/gps_emulator.py
   scripts/ekf.py
+  scripts/mpc_4states.py
+  scripts/mpc_lib.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

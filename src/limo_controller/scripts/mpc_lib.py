@@ -25,10 +25,10 @@ MAX_TIME = 500.0  # max simulation time
 MAX_ITER = 3  # Max iteration
 DU_TH = 0.1  # iteration finish param
 
-TARGET_SPEED = 10.0 / 3.6  # [m/s] target speed
+TARGET_SPEED = 1.0  # [m/s] target speed
 N_IND_SEARCH = 10  # Search index number
 
-DT = 0.2  # [s] time tick
+DT = 0.01  # [s] time tick
 
 # Vehicle parameters
 LENGTH = 4.5  # [m]
@@ -37,13 +37,21 @@ BACKTOWHEEL = 1.0  # [m]
 WHEEL_LEN = 0.3  # [m]
 WHEEL_WIDTH = 0.2  # [m]
 TREAD = 0.7  # [m]
-WB = 2.5  # [m]
+WB = 0.2  # [m]
 
-MAX_STEER = np.deg2rad(45.0)  # maximum steering angle [rad]
-MAX_DSTEER = np.deg2rad(30.0)  # maximum steering speed [rad/s]
-MAX_SPEED = 55.0 / 3.6  # maximum speed [m/s]
-MIN_SPEED = -20.0 / 3.6  # minimum speed [m/s]
-MAX_ACCEL = 1.0  # maximum accel [m/ss]
+WHEEL_RADIUS = 0.045  # [m]
+WHEEL_BASE = 0.2  # [m]
+TRACK_WIDTH = 0.14  # [m] track width
+
+MAX_STEER = math.radians(10.0)  # maximum steering angle [rad]
+MAX_DSTEER = math.radians(5.0)  # maximum steering speed [rad/s]
+MAX_SPEED = 1.0  # maximum speed [m/s]
+MIN_SPEED = 1.0  # minimum speed [m/s]
+MAX_ACCEL = 0.5  # maximum accel [m/ss]
+MAX_LINEAR_VEL = 1.0  # maximum linear velocity [m/s]
+MIN_LINEAR_VEL = -1.0  # minimum linear velocity [m/s]
+MAX_ANGULAR_VEL = math.radians(5)  # maximum angular velocity [rad/s]
+MIN_ANGULAR_VEL = -math.radians(5)  # minimum angular velocity [rad/s]
 
 show_animation = True
 
@@ -88,60 +96,60 @@ def get_linear_model_matrix(v, phi, delta):
     return A, B, C
 
 
-def plot_car(x, y, yaw, steer=0.0, cabcolor="-r", truckcolor="-k"):  # pragma: no cover
+# def plot_car(x, y, yaw, steer=0.0, cabcolor="-r", truckcolor="-k"):  # pragma: no cover
 
-    outline = np.array([[-BACKTOWHEEL, (LENGTH - BACKTOWHEEL), (LENGTH - BACKTOWHEEL), -BACKTOWHEEL, -BACKTOWHEEL],
-                        [WIDTH / 2, WIDTH / 2, - WIDTH / 2, -WIDTH / 2, WIDTH / 2]])
+#     outline = np.array([[-BACKTOWHEEL, (LENGTH - BACKTOWHEEL), (LENGTH - BACKTOWHEEL), -BACKTOWHEEL, -BACKTOWHEEL],
+#                         [WIDTH / 2, WIDTH / 2, - WIDTH / 2, -WIDTH / 2, WIDTH / 2]])
 
-    fr_wheel = np.array([[WHEEL_LEN, -WHEEL_LEN, -WHEEL_LEN, WHEEL_LEN, WHEEL_LEN],
-                         [-WHEEL_WIDTH - TREAD, -WHEEL_WIDTH - TREAD, WHEEL_WIDTH - TREAD, WHEEL_WIDTH - TREAD, -WHEEL_WIDTH - TREAD]])
+#     fr_wheel = np.array([[WHEEL_LEN, -WHEEL_LEN, -WHEEL_LEN, WHEEL_LEN, WHEEL_LEN],
+#                          [-WHEEL_WIDTH - TREAD, -WHEEL_WIDTH - TREAD, WHEEL_WIDTH - TREAD, WHEEL_WIDTH - TREAD, -WHEEL_WIDTH - TREAD]])
 
-    rr_wheel = np.copy(fr_wheel)
+#     rr_wheel = np.copy(fr_wheel)
 
-    fl_wheel = np.copy(fr_wheel)
-    fl_wheel[1, :] *= -1
-    rl_wheel = np.copy(rr_wheel)
-    rl_wheel[1, :] *= -1
+#     fl_wheel = np.copy(fr_wheel)
+#     fl_wheel[1, :] *= -1
+#     rl_wheel = np.copy(rr_wheel)
+#     rl_wheel[1, :] *= -1
 
-    Rot1 = np.array([[math.cos(yaw), math.sin(yaw)],
-                     [-math.sin(yaw), math.cos(yaw)]])
-    Rot2 = np.array([[math.cos(steer), math.sin(steer)],
-                     [-math.sin(steer), math.cos(steer)]])
+#     Rot1 = np.array([[math.cos(yaw), math.sin(yaw)],
+#                      [-math.sin(yaw), math.cos(yaw)]])
+#     Rot2 = np.array([[math.cos(steer), math.sin(steer)],
+#                      [-math.sin(steer), math.cos(steer)]])
 
-    fr_wheel = (fr_wheel.T.dot(Rot2)).T
-    fl_wheel = (fl_wheel.T.dot(Rot2)).T
-    fr_wheel[0, :] += WB
-    fl_wheel[0, :] += WB
+#     fr_wheel = (fr_wheel.T.dot(Rot2)).T
+#     fl_wheel = (fl_wheel.T.dot(Rot2)).T
+#     fr_wheel[0, :] += WB
+#     fl_wheel[0, :] += WB
 
-    fr_wheel = (fr_wheel.T.dot(Rot1)).T
-    fl_wheel = (fl_wheel.T.dot(Rot1)).T
+#     fr_wheel = (fr_wheel.T.dot(Rot1)).T
+#     fl_wheel = (fl_wheel.T.dot(Rot1)).T
 
-    outline = (outline.T.dot(Rot1)).T
-    rr_wheel = (rr_wheel.T.dot(Rot1)).T
-    rl_wheel = (rl_wheel.T.dot(Rot1)).T
+#     outline = (outline.T.dot(Rot1)).T
+#     rr_wheel = (rr_wheel.T.dot(Rot1)).T
+#     rl_wheel = (rl_wheel.T.dot(Rot1)).T
 
-    outline[0, :] += x
-    outline[1, :] += y
-    fr_wheel[0, :] += x
-    fr_wheel[1, :] += y
-    rr_wheel[0, :] += x
-    rr_wheel[1, :] += y
-    fl_wheel[0, :] += x
-    fl_wheel[1, :] += y
-    rl_wheel[0, :] += x
-    rl_wheel[1, :] += y
+#     outline[0, :] += x
+#     outline[1, :] += y
+#     fr_wheel[0, :] += x
+#     fr_wheel[1, :] += y
+#     rr_wheel[0, :] += x
+#     rr_wheel[1, :] += y
+#     fl_wheel[0, :] += x
+#     fl_wheel[1, :] += y
+#     rl_wheel[0, :] += x
+#     rl_wheel[1, :] += y
 
-    plt.plot(np.array(outline[0, :]).flatten(),
-             np.array(outline[1, :]).flatten(), truckcolor)
-    plt.plot(np.array(fr_wheel[0, :]).flatten(),
-             np.array(fr_wheel[1, :]).flatten(), truckcolor)
-    plt.plot(np.array(rr_wheel[0, :]).flatten(),
-             np.array(rr_wheel[1, :]).flatten(), truckcolor)
-    plt.plot(np.array(fl_wheel[0, :]).flatten(),
-             np.array(fl_wheel[1, :]).flatten(), truckcolor)
-    plt.plot(np.array(rl_wheel[0, :]).flatten(),
-             np.array(rl_wheel[1, :]).flatten(), truckcolor)
-    plt.plot(x, y, "*")
+#     plt.plot(np.array(outline[0, :]).flatten(),
+#              np.array(outline[1, :]).flatten(), truckcolor)
+#     plt.plot(np.array(fr_wheel[0, :]).flatten(),
+#              np.array(fr_wheel[1, :]).flatten(), truckcolor)
+#     plt.plot(np.array(rr_wheel[0, :]).flatten(),
+#              np.array(rr_wheel[1, :]).flatten(), truckcolor)
+#     plt.plot(np.array(fl_wheel[0, :]).flatten(),
+#              np.array(fl_wheel[1, :]).flatten(), truckcolor)
+#     plt.plot(np.array(rl_wheel[0, :]).flatten(),
+#              np.array(rl_wheel[1, :]).flatten(), truckcolor)
+#     plt.plot(x, y, "*")
 
 
 def update_state(state, a, delta):
@@ -527,4 +535,3 @@ def get_switch_back_course(dl):
     ck.extend(ck2)
 
     return cx, cy, cyaw, ck
-
