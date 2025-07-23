@@ -1,20 +1,81 @@
-from PathPlanning.CubicSpline import cubic_spline_planner
-import matplotlib.pyplot as plt
-import time
-import cvxpy
+#!/usr/bin/env python3
+
 import math
 import numpy as np
 import sys
-import pathlib
-from utils.angle import angle_mod
+import os
+import cvxpy
 
-show_animation = True
+# ROBUST IMPORT HANDLING
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+
+# Try multiple import strategies for PathPlanning and utils
+cubic_spline_planner = None
+angle_mod = None
+
+try:
+    from PathPlanning.CubicSpline import cubic_spline_planner
+    from utils.angle import angle_mod
+except ImportError:
+    try:
+        sys.path.insert(0, os.path.join(current_dir, "PathPlanning", "CubicSpline"))
+        sys.path.insert(0, os.path.join(current_dir, "utils"))
+        import cubic_spline_planner
+        from angle import angle_mod
+    except ImportError:
+        # Fallback implementations
+        def angle_mod(angle):
+            while angle > math.pi:
+                angle -= 2.0 * math.pi
+            while angle < -math.pi:
+                angle += 2.0 * math.pi
+            return angle
+
+        # Minimal cubic spline fallback
+        class FallbackCubicSplinePlanner:
+            @staticmethod
+            def calc_spline_course(ax, ay, ds=0.1):
+                if len(ax) < 2:
+                    return ax, ay, [0.0] * len(ax), [0.0] * len(ax), [0.0] * len(ax)
+
+                rx, ry, ryaw, rk, s = [], [], [], [], []
+                total_length = 0
+
+                for i in range(len(ax) - 1):
+                    dx = ax[i + 1] - ax[i]
+                    dy = ay[i + 1] - ay[i]
+                    dist = math.sqrt(dx * dx + dy * dy)
+                    yaw = math.atan2(dy, dx)
+
+                    num_points = max(1, int(dist / ds))
+                    for j in range(num_points):
+                        ratio = j / num_points if num_points > 0 else 0
+                        x_interp = ax[i] + ratio * dx
+                        y_interp = ay[i] + ratio * dy
+                        rx.append(x_interp)
+                        ry.append(y_interp)
+                        ryaw.append(yaw)
+                        rk.append(0.0)
+                        s.append(total_length + ratio * dist)
+
+                    total_length += dist
+
+                rx.append(ax[-1])
+                ry.append(ay[-1])
+                ryaw.append(ryaw[-1] if ryaw else 0.0)
+                rk.append(0.0)
+                s.append(total_length)
+
+                return rx, ry, ryaw, rk, s
+
+        cubic_spline_planner = FallbackCubicSplinePlanner()
+
+show_animation = False  # Disable for ROS environment
 
 
 class State:
-    """
-    vehicle state class
-    """
+    """Vehicle state class"""
 
     def __init__(self, x=0.0, y=0.0, yaw=0.0, v=0.0):
         self.x = x
@@ -29,9 +90,7 @@ def pi_2_pi(angle):
 
 
 def get_linear_model_matrix(v, phi, delta, config):
-    """
-    Get linear model matrix with configurable parameters
-    """
+    """Get linear model matrix with configurable parameters"""
     A = np.zeros((config.NX, config.NX))
     A[0, 0] = 1.0
     A[1, 1] = 1.0
@@ -56,9 +115,7 @@ def get_linear_model_matrix(v, phi, delta, config):
 
 
 def update_state(state, a, delta, config):
-    """
-    Update state with configurable parameters
-    """
+    """Update state with configurable parameters"""
     # input check
     if delta >= config.MAX_STEER:
         delta = config.MAX_STEER
@@ -83,16 +140,14 @@ def get_nparray_from_matrix(x):
 
 
 def calc_nearest_index(state, cx, cy, cyaw, pind, config):
-    """
-    Calculate nearest index with configurable search parameters
-    """
-    dx = [state.x - icx for icx in cx[pind : (pind + config.N_IND_SEARCH)]]
-    dy = [state.y - icy for icy in cy[pind : (pind + config.N_IND_SEARCH)]]
+    """Calculate nearest index with configurable search parameters"""
+    search_range = min(config.N_IND_SEARCH, len(cx) - pind)
+    dx = [state.x - icx for icx in cx[pind : (pind + search_range)]]
+    dy = [state.y - icy for icy in cy[pind : (pind + search_range)]]
 
     d = [idx**2 + idy**2 for (idx, idy) in zip(dx, dy)]
 
     mind = min(d)
-
     ind = d.index(mind) + pind
 
     mind = math.sqrt(mind)
@@ -108,9 +163,7 @@ def calc_nearest_index(state, cx, cy, cyaw, pind, config):
 
 
 def predict_motion(x0, oa, od, xref, config):
-    """
-    Predict motion with configurable parameters
-    """
+    """Predict motion with configurable parameters"""
     xbar = xref * 0.0
     for i, _ in enumerate(x0):
         xbar[i, 0] = x0[i]
@@ -127,9 +180,7 @@ def predict_motion(x0, oa, od, xref, config):
 
 
 def iterative_linear_mpc_control(xref, x0, dref, oa, od, config):
-    """
-    MPC control with updating operational point iteratively
-    """
+    """MPC control with updating operational point iteratively"""
     ox, oy, oyaw, ov = None, None, None, None
 
     if oa is None or od is None:
@@ -173,95 +224,94 @@ def iterative_linear_mpc_control(xref, x0, dref, oa, od, config):
 
 
 def linear_mpc_control(xref, xbar, x0, dref, config):
-    """
-    Linear MPC control with configurable parameters
+    """Linear MPC control with configurable parameters"""
+    try:
+        x = cvxpy.Variable((config.NX, config.T + 1))
+        u = cvxpy.Variable((config.NU, config.T))
 
-    xref: reference point
-    xbar: operational point
-    x0: initial state
-    dref: reference steer angle
-    config: configuration object with all parameters
-    """
+        cost = 0.0
+        constraints = []
 
-    x = cvxpy.Variable((config.NX, config.T + 1))
-    u = cvxpy.Variable((config.NU, config.T))
+        for t in range(config.T):
+            cost += cvxpy.quad_form(u[:, t], config.R)
 
-    cost = 0.0
-    constraints = []
+            if t != 0:
+                cost += cvxpy.quad_form(xref[:, t] - x[:, t], config.Q)
 
-    for t in range(config.T):
-        cost += cvxpy.quad_form(u[:, t], config.R)
+            A, B, C = get_linear_model_matrix(
+                xbar[2, t], xbar[3, t], dref[0, t], config
+            )
+            constraints += [x[:, t + 1] == A @ x[:, t] + B @ u[:, t] + C]
 
-        if t != 0:
-            cost += cvxpy.quad_form(xref[:, t] - x[:, t], config.Q)
+            if t < (config.T - 1):
+                cost += cvxpy.quad_form(u[:, t + 1] - u[:, t], config.Rd)
+                constraints += [
+                    cvxpy.abs(u[1, t + 1] - u[1, t]) <= config.MAX_DSTEER * config.DT
+                ]
 
-        A, B, C = get_linear_model_matrix(xbar[2, t], xbar[3, t], dref[0, t], config)
-        constraints += [x[:, t + 1] == A @ x[:, t] + B @ u[:, t] + C]
+        cost += cvxpy.quad_form(xref[:, config.T] - x[:, config.T], config.Qf)
 
-        if t < (config.T - 1):
-            cost += cvxpy.quad_form(u[:, t + 1] - u[:, t], config.Rd)
-            constraints += [
-                cvxpy.abs(u[1, t + 1] - u[1, t]) <= config.MAX_DSTEER * config.DT
-            ]
+        constraints += [x[:, 0] == x0]
+        constraints += [x[2, :] <= config.MAX_SPEED]
+        constraints += [x[2, :] >= config.MIN_SPEED]
+        constraints += [cvxpy.abs(u[0, :]) <= config.MAX_ACCEL]
+        constraints += [cvxpy.abs(u[1, :]) <= config.MAX_STEER]
 
-    cost += cvxpy.quad_form(xref[:, config.T] - x[:, config.T], config.Qf)
+        prob = cvxpy.Problem(cvxpy.Minimize(cost), constraints)
 
-    constraints += [x[:, 0] == x0]
-    constraints += [x[2, :] <= config.MAX_SPEED]
-    constraints += [x[2, :] >= config.MIN_SPEED]
-    constraints += [cvxpy.abs(u[0, :]) <= config.MAX_ACCEL]
-    constraints += [cvxpy.abs(u[1, :]) <= config.MAX_STEER]
+        # Try multiple solvers in order of preference
+        solvers_to_try = [cvxpy.CLARABEL, cvxpy.OSQP, cvxpy.SCS, cvxpy.ECOS]
 
-    prob = cvxpy.Problem(cvxpy.Minimize(cost), constraints)
+        solved = False
+        for solver in solvers_to_try:
+            try:
+                if solver == cvxpy.CLARABEL:
+                    prob.solve(solver=solver, verbose=False, max_iter=1000)
+                elif solver == cvxpy.OSQP:
+                    prob.solve(
+                        solver=solver,
+                        verbose=False,
+                        max_iter=1000,
+                        eps_abs=1e-4,
+                        eps_rel=1e-4,
+                    )
+                elif solver == cvxpy.SCS:
+                    prob.solve(solver=solver, verbose=False, max_iters=1000, eps=1e-4)
+                else:
+                    prob.solve(solver=solver, verbose=False)
 
-    # Try multiple solvers in order of preference
-    solvers_to_try = [cvxpy.CLARABEL, cvxpy.OSQP, cvxpy.SCS, cvxpy.ECOS]
+                if (
+                    prob.status == cvxpy.OPTIMAL
+                    or prob.status == cvxpy.OPTIMAL_INACCURATE
+                ):
+                    solved = True
+                    break
+                else:
+                    print(f"Solver {solver} failed with status: {prob.status}")
+            except Exception as e:
+                print(f"Solver {solver} encountered error: {e}")
+                continue
 
-    solved = False
-    for solver in solvers_to_try:
-        try:
-            if solver == cvxpy.CLARABEL:
-                prob.solve(solver=solver, verbose=False, max_iter=1000)
-            elif solver == cvxpy.OSQP:
-                prob.solve(
-                    solver=solver,
-                    verbose=False,
-                    max_iter=1000,
-                    eps_abs=1e-4,
-                    eps_rel=1e-4,
-                )
-            elif solver == cvxpy.SCS:
-                prob.solve(solver=solver, verbose=False, max_iters=1000, eps=1e-4)
-            else:
-                prob.solve(solver=solver, verbose=False)
+        if solved:
+            ox = get_nparray_from_matrix(x.value[0, :])
+            oy = get_nparray_from_matrix(x.value[1, :])
+            ov = get_nparray_from_matrix(x.value[2, :])
+            oyaw = get_nparray_from_matrix(x.value[3, :])
+            oa = get_nparray_from_matrix(u.value[0, :])
+            odelta = get_nparray_from_matrix(u.value[1, :])
+        else:
+            print("Error: Cannot solve mpc with any available solver")
+            oa, odelta, ox, oy, oyaw, ov = None, None, None, None, None, None
 
-            if prob.status == cvxpy.OPTIMAL or prob.status == cvxpy.OPTIMAL_INACCURATE:
-                solved = True
-                break
-            else:
-                print(f"Solver {solver} failed with status: {prob.status}")
-        except Exception as e:
-            print(f"Solver {solver} encountered error: {e}")
-            continue
-
-    if solved:
-        ox = get_nparray_from_matrix(x.value[0, :])
-        oy = get_nparray_from_matrix(x.value[1, :])
-        ov = get_nparray_from_matrix(x.value[2, :])
-        oyaw = get_nparray_from_matrix(x.value[3, :])
-        oa = get_nparray_from_matrix(u.value[0, :])
-        odelta = get_nparray_from_matrix(u.value[1, :])
-    else:
-        print("Error: Cannot solve mpc with any available solver")
+    except Exception as e:
+        print(f"MPC optimization error: {e}")
         oa, odelta, ox, oy, oyaw, ov = None, None, None, None, None, None
 
     return oa, odelta, ox, oy, oyaw, ov
 
 
 def calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, pind, config):
-    """
-    Calculate reference trajectory with configurable parameters
-    """
+    """Calculate reference trajectory with configurable parameters"""
     xref = np.zeros((config.NX, config.T + 1))
     dref = np.zeros((1, config.T + 1))
     ncourse = len(cx)
@@ -300,9 +350,7 @@ def calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, pind, config):
 
 
 def check_goal(state, goal, tind, nind, config):
-    """
-    Check if goal is reached with configurable parameters
-    """
+    """Check if goal is reached with configurable parameters"""
     # check goal
     dx = state.x - goal[0]
     dy = state.y - goal[1]
@@ -322,9 +370,7 @@ def check_goal(state, goal, tind, nind, config):
 
 
 def calc_speed_profile(cx, cy, cyaw, target_speed, config):
-    """
-    Calculate speed profile with configurable parameters
-    """
+    """Calculate speed profile with configurable parameters"""
     speed_profile = [target_speed] * len(cx)
     direction = 1.0  # forward
 
@@ -353,9 +399,7 @@ def calc_speed_profile(cx, cy, cyaw, target_speed, config):
 
 
 def smooth_yaw(yaw, config):
-    """
-    Smooth yaw angles with configurable parameters
-    """
+    """Smooth yaw angles with configurable parameters"""
     for i in range(len(yaw) - 1):
         dyaw = yaw[i + 1] - yaw[i]
 
@@ -370,76 +414,8 @@ def smooth_yaw(yaw, config):
     return yaw
 
 
-def load_path_from_yaml(yaml_file, config):
-    """
-    Load path from YAML file (manual parsing without yaml library)
-    """
-    try:
-        with open(yaml_file, "r") as file:
-            lines = file.readlines()
-
-        cx = []
-        cy = []
-        cyaw = []
-
-        # Parse each line manually
-        current_point = {}
-        for line in lines:
-            line = line.strip()
-            if line.startswith("- x:"):
-                # New point starts
-                if (
-                    current_point
-                    and "x" in current_point
-                    and "y" in current_point
-                    and "yaw" in current_point
-                ):
-                    cx.append(current_point["x"])
-                    cy.append(current_point["y"])
-                    cyaw.append(current_point["yaw"])
-                current_point = {}
-                # Extract x value
-                x_val = float(line.split("x:")[1].strip())
-                current_point["x"] = x_val
-            elif line.startswith("y:"):
-                # Extract y value
-                y_val = float(line.split("y:")[1].strip())
-                current_point["y"] = y_val
-            elif line.startswith("yaw:"):
-                # Extract yaw value
-                yaw_val = float(line.split("yaw:")[1].strip())
-                current_point["yaw"] = yaw_val
-
-        # Don't forget the last point
-        if (
-            current_point
-            and "x" in current_point
-            and "y" in current_point
-            and "yaw" in current_point
-        ):
-            cx.append(current_point["x"])
-            cy.append(current_point["y"])
-            cyaw.append(current_point["yaw"])
-
-        # Calculate curvature (simplified - set to zero for now)
-        ck = [0.0] * len(cx)
-
-        print(f"Loaded path with {len(cx)} points from {yaml_file}")
-
-        return cx, cy, cyaw, ck
-
-    except FileNotFoundError:
-        print(f"Error: Could not find file {yaml_file}")
-        return None, None, None, None
-    except Exception as e:
-        print(f"Error loading path from YAML: {e}")
-        return None, None, None, None
-
-
 def calculate_path_distance(cx, cy):
-    """
-    Calculate approximate path distance for dl parameter
-    """
+    """Calculate approximate path distance for dl parameter"""
     if len(cx) < 2:
         return 1.0
 
@@ -458,7 +434,6 @@ def get_straight_course(dl):
     ax = [0.0, 5.0, 10.0, 20.0, 30.0, 40.0, 50.0]
     ay = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(ax, ay, ds=dl)
-
     return cx, cy, cyaw, ck
 
 
@@ -466,7 +441,6 @@ def get_straight_course2(dl):
     ax = [0.0, -10.0, -20.0, -40.0, -50.0, -60.0, -70.0]
     ay = [0.0, -1.0, 1.0, 0.0, -1.0, 1.0, 0.0]
     cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(ax, ay, ds=dl)
-
     return cx, cy, cyaw, ck
 
 
@@ -474,9 +448,7 @@ def get_straight_course3(dl):
     ax = [0.0, -10.0, -20.0, -40.0, -50.0, -60.0, -70.0]
     ay = [0.0, -1.0, 1.0, 0.0, -1.0, 1.0, 0.0]
     cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(ax, ay, ds=dl)
-
     cyaw = [i - math.pi for i in cyaw]
-
     return cx, cy, cyaw, ck
 
 
@@ -484,7 +456,6 @@ def get_forward_course(dl):
     ax = [0.0, 60.0, 125.0, 50.0, 75.0, 30.0, -10.0]
     ay = [0.0, 0.0, 50.0, 65.0, 30.0, 50.0, -20.0]
     cx, cy, cyaw, ck, s = cubic_spline_planner.calc_spline_course(ax, ay, ds=dl)
-
     return cx, cy, cyaw, ck
 
 
@@ -500,5 +471,4 @@ def get_switch_back_course(dl):
     cy.extend(cy2)
     cyaw.extend(cyaw2)
     ck.extend(ck2)
-
     return cx, cy, cyaw, ck
