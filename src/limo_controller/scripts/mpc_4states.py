@@ -125,10 +125,9 @@ class MPCNode(Node):
         # Convert path to MPC format
         if self.path is not None:
             self.init_path()
+            self.init_mpc()
         else:
             self.get_logger().error("Failed to load path - controller inactive")
-
-        self.init_mpc()
 
     def _declare_parameter_if_not_exists(self, name, default_value):
         """Helper method to declare parameter only if it doesn't exist"""
@@ -218,7 +217,7 @@ class MPCNode(Node):
             self.state.yaw += math.pi * 2.0
 
         self.target_ind, _ = calc_nearest_index(self.state, self.cx, self.cy, self.cyaw, 0)
-        self.get_logger().info(f"{target_ind}")
+        self.get_logger().info(f"{self.target_ind}")
 
         self.odelta, self.oa = None, None
 
@@ -240,7 +239,7 @@ class MPCNode(Node):
             self.get_logger().error(f"Error reading odometry: {e}")
             return
 
-        xref, target_ind, dref = calc_ref_trajectory(
+        xref, self.target_ind, dref = calc_ref_trajectory(
             self.state,
             self.cx,
             self.cy,
@@ -251,7 +250,18 @@ class MPCNode(Node):
             self.target_ind,
         )
 
-        x0 = [state.x, state.y, state.v, state.yaw]  # current state
+        x0 = [self.state.x, self.state.y, self.state.v, self.state.yaw]  # current state
+
+        self.oa, self.odelta, ox, oy, oyaw, ov = iterative_linear_mpc_control(
+            xref, x0, dref, self.oa, self.odelta
+        )
+
+        di, ai = 0.0, 0.0
+        if self.odelta is not None:
+            di, ai = self.odelta[0], self.oa[0]
+
+            # self.state = update_state(self.state, ai, di) # In Simulation
+            self.state = self.get_state(self.robot_odom)
 
     def timer_callback(self):
         """Timer callback for MPC control loop"""
