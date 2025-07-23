@@ -209,6 +209,22 @@ class MPCNode(Node):
         self.get_logger().info(f"Target speed: {self.target_speed:.2f}m/s, Control mode: differential drive")
         self.get_logger().info(f"MPC params: T={T}, DT={DT:.3f}s, MAX_LINEAR_VEL={MAX_LINEAR_VEL:.1f}m/s, MAX_ANGULAR_VEL={MAX_ANGULAR_VEL:.1f}rad/s")
         
+    def init_mpc(self):
+        initial_state = State(x=self.cx[0], y=self.cy[0], yaw=self.cyaw[0], v=0.0)
+        self.goal = [self.cx[-1], self.cy[-1]]
+        self.state = initial_state
+        
+        # initial yaw compensation
+        if self.state.yaw - self.cyaw[0] >= math.pi:
+            self.state.yaw -= math.pi * 2.0
+        elif self.state.yaw - self.cyaw[0] <= -math.pi:
+            self.state.yaw += math.pi * 2.0
+
+        target_ind, _ = calc_nearest_index(self.state, self.cx, self.cy, self.cyaw, 0)
+
+        odelta, oa = None, None
+        
+        
     def mpc_control(self):
         """Main MPC control function"""
         if self.path is None:
