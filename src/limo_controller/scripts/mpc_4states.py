@@ -35,65 +35,65 @@ from mpc_lib import *
 
 
 # ============================================================================
-# CENTRALIZED PARAMETER CONFIGURATION
+# IMPROVED PARAMETER CONFIGURATION FOR BETTER TRACKING
 # ============================================================================
 class MPCConfig:
-    """Centralized configuration class for all MPC parameters"""
+    """Improved configuration class for better MPC path tracking"""
 
     # State and Control Dimensions
     NX = 4  # x = x, y, v, yaw
     NU = 2  # a = [accel, steer]
-    T = 5  # horizon length
+    T = 15  # INCREASED horizon length for better lookahead
 
-    # MPC Cost Matrices
-    R = np.diag([0.01, 0.01])  # input cost matrix
-    Rd = np.diag([0.01, 1.0])  # input difference cost matrix
-    Q = np.diag([1.0, 1.0, 0.5, 0.5])  # state cost matrix
-    Qf = Q  # state final matrix
+    # IMPROVED MPC Cost Matrices for better tracking
+    R = np.diag([0.1, 0.1])  # INCREASED input cost to reduce aggressiveness
+    Rd = np.diag([0.05, 0.5])  # BALANCED input difference cost
+    Q = np.diag([10.0, 10.0, 1.0, 5.0])  # INCREASED position and yaw tracking weights
+    Qf = np.diag([15.0, 15.0, 1.0, 10.0])  # HIGHER terminal cost for stability
 
     # Goal and Stopping Parameters
-    GOAL_DIS = 1.5  # goal distance [m]
-    STOP_SPEED = 0.5 / 3.6  # stop speed [m/s]
-    MAX_TIME = 500.0  # max simulation time [s]
+    GOAL_DIS = 1.0  # REDUCED for more precise goal reaching
+    STOP_SPEED = 0.2 / 3.6  # REDUCED stop speed
+    MAX_TIME = 500.0
 
     # Iterative Parameters
-    MAX_ITER = 3  # Max iteration
-    DU_TH = 0.1  # iteration finish param
+    MAX_ITER = 5  # INCREASED for better convergence
+    DU_TH = 0.05  # REDUCED threshold for more precise convergence
 
     # Speed Parameters
-    TARGET_SPEED = 1.0  # [m/s] target speed
-    N_IND_SEARCH = 10  # Search index number
+    TARGET_SPEED = 0.8  # REDUCED target speed for better tracking
+    N_IND_SEARCH = 15  # INCREASED search range
 
     # Time Step
-    DT = 0.01  # [s] time tick
+    DT = 0.05  # INCREASED time step for more reasonable horizon
 
     # Vehicle Physical Parameters
-    LENGTH = 4.5  # [m]
-    WIDTH = 2.0  # [m]
-    BACKTOWHEEL = 1.0  # [m]
-    WHEEL_LEN = 0.3  # [m]
-    WHEEL_WIDTH = 0.2  # [m]
-    TREAD = 0.7  # [m]
-    WB = 0.2  # [m] wheelbase
+    LENGTH = 4.5
+    WIDTH = 2.0
+    BACKTOWHEEL = 1.0
+    WHEEL_LEN = 0.3
+    WHEEL_WIDTH = 0.2
+    TREAD = 0.7
+    WB = 0.2
 
     # Robot-specific Parameters
-    WHEEL_RADIUS = 0.045  # [m]
-    WHEEL_BASE = 0.2  # [m]
-    TRACK_WIDTH = 0.14  # [m] track width
+    WHEEL_RADIUS = 0.045
+    WHEEL_BASE = 0.2
+    TRACK_WIDTH = 0.14
 
-    # Control Constraints
-    MAX_STEER = math.radians(10.0)  # maximum steering angle [rad]
-    MAX_DSTEER = math.radians(5.0)  # maximum steering speed [rad/s]
-    MAX_SPEED = 1.0  # maximum speed [m/s]
-    MIN_SPEED = -1.0  # minimum speed [m/s]
-    MAX_ACCEL = 0.5  # maximum accel [m/s²]
-    MAX_LINEAR_VEL = 1.0  # maximum linear velocity [m/s]
-    MIN_LINEAR_VEL = -1.0  # minimum linear velocity [m/s]
-    MAX_ANGULAR_VEL = math.radians(5)  # maximum angular velocity [rad/s]
-    MIN_ANGULAR_VEL = -math.radians(5)  # minimum angular velocity [rad/s]
+    # IMPROVED Control Constraints
+    MAX_STEER = math.radians(8.0)  # REDUCED max steering for smoother control
+    MAX_DSTEER = math.radians(3.0)  # REDUCED steering rate for smoother control
+    MAX_SPEED = 1.2  # Slightly increased
+    MIN_SPEED = -0.5  # Limited reverse speed
+    MAX_ACCEL = 0.3  # REDUCED max acceleration for smoother control
+    MAX_LINEAR_VEL = 1.2
+    MIN_LINEAR_VEL = -0.5
+    MAX_ANGULAR_VEL = math.radians(15)  # INCREASED for better turning
+    MIN_ANGULAR_VEL = -math.radians(15)
 
     # Safety Parameters
-    MAX_MPC_FAILURES = 10  # max consecutive MPC failures before emergency stop
+    MAX_MPC_FAILURES = 5  # REDUCED for faster response to failures
 
     @classmethod
     def get_dict(cls):
@@ -138,7 +138,7 @@ class MPCConfig:
                 cls.MAX_SPEED = (
                     node.get_parameter("max_speed").get_parameter_value().double_value
                 )
-                cls.MAX_LINEAR_VEL = cls.MAX_SPEED  # Keep them synchronized
+                cls.MAX_LINEAR_VEL = cls.MAX_SPEED
                 node.get_logger().info(f"Updated MAX_SPEED to {cls.MAX_SPEED}")
 
             # Update max steering if provided
@@ -150,6 +150,24 @@ class MPCConfig:
                 )
                 cls.MAX_STEER = math.radians(max_steer_deg)
                 node.get_logger().info(f"Updated MAX_STEER to {max_steer_deg} degrees")
+
+            # Add tracking weight parameters
+            if node.has_parameter("position_weight"):
+                pos_weight = (
+                    node.get_parameter("position_weight")
+                    .get_parameter_value()
+                    .double_value
+                )
+                cls.Q[0, 0] = pos_weight
+                cls.Q[1, 1] = pos_weight
+                node.get_logger().info(f"Updated position weight to {pos_weight}")
+
+            if node.has_parameter("yaw_weight"):
+                yaw_weight = (
+                    node.get_parameter("yaw_weight").get_parameter_value().double_value
+                )
+                cls.Q[3, 3] = yaw_weight
+                node.get_logger().info(f"Updated yaw weight to {yaw_weight}")
 
         except Exception as e:
             node.get_logger().warn(f"Error updating parameters from ROS: {e}")
@@ -172,6 +190,9 @@ class MPCNode(Node):
         self._declare_parameter_if_not_exists(
             "max_steer_deg", math.degrees(MPCConfig.MAX_STEER)
         )
+        # Add new tuning parameters
+        self._declare_parameter_if_not_exists("position_weight", 10.0)
+        self._declare_parameter_if_not_exists("yaw_weight", 5.0)
 
         # Update config from ROS parameters
         MPCConfig.update_from_ros_params(self)
@@ -198,11 +219,16 @@ class MPCNode(Node):
             Odometry, "/odometry/ground_truth", self.odom_callback, 10
         )
         self.create_timer(MPCConfig.DT, self.timer_callback)  # MPC control loop
-        self.robot_odom = None  # Initialize as None, will be set in callback
+        self.robot_odom = None
 
         # Set up publishers
         self.cmd_vel_pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self.path_pub = self.create_publisher(Path, "/path", 10)
+
+        # NEW: Add publisher for current reference point for tracking analysis
+        self.reference_pub = self.create_publisher(
+            PoseStamped, "/mpc/reference_pose", 10
+        )
 
         # Load the path from YAML
         self.path = self.read_path()
@@ -216,24 +242,25 @@ class MPCNode(Node):
         # Publish the full path
         self.publish_path()
 
-        # ------------------------------------------#
         # Vehicle parameters (from config)
-        self.wheel_radius = MPCConfig.WHEEL_RADIUS  # [m]
-        self.l = MPCConfig.WHEEL_BASE  # wheelbase for steering conversion
-        self.track = MPCConfig.TRACK_WIDTH  # [m], track width
+        self.wheel_radius = MPCConfig.WHEEL_RADIUS
+        self.l = MPCConfig.WHEEL_BASE
+        self.track = MPCConfig.TRACK_WIDTH
 
         # MPC state variables
         self.current_state = State()
         self.target_ind = 0
-        self.prev_linear_vel = 0.0  # previous linear velocity commands
-        self.prev_angular_vel = 0.0  # previous angular velocity commands
-
-        self.linear_x = 0.0  # linear velocity command
+        self.prev_linear_vel = 0.0
+        self.prev_angular_vel = 0.0
+        self.linear_x = 0.0
 
         # Error handling and fallback variables
         self.mpc_failed_count = 0
         self.max_mpc_failures = MPCConfig.MAX_MPC_FAILURES
         self.emergency_stop = False
+
+        # NEW: Variables for reference tracking
+        self.current_reference = None
 
         # Initialize MPC library with our configuration
         if self.path is not None:
@@ -252,7 +279,7 @@ class MPCNode(Node):
             )
 
     def read_path(self):
-        """Load path from YAML file (same as Stanley controller)"""
+        """Load path from YAML file"""
         try:
             pkg = get_package_share_directory("limo_controller")
             yaml_path = os.path.join(pkg, "path", "path.yaml")
@@ -309,27 +336,27 @@ class MPCNode(Node):
 
     def init_path(self):
         # Path variables
-        self.cx = self.path[:, 0]  # x coordinates
-        self.cy = self.path[:, 1]  # y coordinates
-        self.cyaw = self.path[:, 2]  # yaw angles
-        self.ck = [0.0] * len(self.cx)  # curvature
+        self.cx = self.path[:, 0]
+        self.cy = self.path[:, 1]
+        self.cyaw = self.path[:, 2]
+        self.ck = [0.0] * len(self.cx)
 
         # Pass config to library functions
         self.sp = calc_speed_profile(
             self.cx, self.cy, self.cyaw, MPCConfig.TARGET_SPEED, MPCConfig
-        )  # speed profile
-        self.dl = calculate_path_distance(self.cx, self.cy)  # path spacing
-        self.cyaw = smooth_yaw(self.cyaw, MPCConfig)  # smooth yaw angles
+        )
+        self.dl = calculate_path_distance(self.cx, self.cy)
+        self.cyaw = smooth_yaw(self.cyaw, MPCConfig)
 
         self.get_logger().info("MPC Controller initialized successfully")
         self.get_logger().info(
-            f"Vehicle params: wheelbase={MPCConfig.WB:.3f}m, track={MPCConfig.TRACK_WIDTH:.3f}m, wheel_radius={MPCConfig.WHEEL_RADIUS:.3f}m"
+            f"IMPROVED Vehicle params: wheelbase={MPCConfig.WB:.3f}m, track={MPCConfig.TRACK_WIDTH:.3f}m"
         )
         self.get_logger().info(
-            f"Target speed: {self.target_speed:.2f}m/s, Control mode: differential drive"
+            f"IMPROVED Target speed: {self.target_speed:.2f}m/s, Horizon: {MPCConfig.T}, DT: {MPCConfig.DT:.3f}s"
         )
         self.get_logger().info(
-            f"MPC params: T={MPCConfig.T}, DT={MPCConfig.DT:.3f}s, MAX_LINEAR_VEL={MPCConfig.MAX_LINEAR_VEL:.1f}m/s, MAX_ANGULAR_VEL={MPCConfig.MAX_ANGULAR_VEL:.1f}rad/s"
+            f"IMPROVED Weights - Position: {MPCConfig.Q[0,0]}, Yaw: {MPCConfig.Q[3,3]}, Input: {MPCConfig.R[0,0]}"
         )
 
     def init_mpc(self):
@@ -350,22 +377,19 @@ class MPCNode(Node):
         self.odelta, self.oa = None, None
 
     def mpc_control(self):
-        """Main MPC control function"""
+        """IMPROVED MPC control function with better error handling"""
         if self.path is None:
             self.get_logger().warn("No path available for MPC control")
             return
 
-        # Check if robot odometry is available
         if not hasattr(self.robot_odom, "pose") or self.robot_odom.pose is None:
             self.get_logger().debug("Robot odometry not available yet")
             return
 
-        # Check for emergency stop
         if self.emergency_stop:
             self.pub_emergency_stop()
             return
 
-        # Update current state from odometry
         try:
             self.current_state = self.get_state(self.robot_odom)
         except Exception as e:
@@ -385,18 +409,29 @@ class MPCNode(Node):
                 MPCConfig,
             )
 
+            # Store current reference for tracking analysis
+            self.current_reference = {
+                "x": float(xref[0, 0]),
+                "y": float(xref[1, 0]),
+                "v": float(xref[2, 0]),
+                "yaw": float(xref[3, 0]),
+                "target_ind": self.target_ind,
+            }
+
+            # Publish reference pose for visualization
+            self.publish_reference_pose()
+
             x0 = [
                 self.state.x,
                 self.state.y,
                 self.state.v,
                 self.state.yaw,
-            ]  # current state
+            ]
 
             self.oa, self.odelta, ox, oy, oyaw, ov = iterative_linear_mpc_control(
                 xref, x0, dref, self.oa, self.odelta, MPCConfig
             )
 
-            # Better error handling for MPC failure
             if self.oa is None or self.odelta is None:
                 self.mpc_failed_count += 1
                 self.get_logger().warn(
@@ -411,25 +446,40 @@ class MPCNode(Node):
                     self.pub_emergency_stop()
                     return
 
-                # Use previous control inputs or safe defaults
-                di, ai = 0.0, -0.1  # Small deceleration to slow down
+                di, ai = 0.0, -0.1
             else:
-                # Reset failure count on successful solve
                 self.mpc_failed_count = 0
                 di, ai = self.odelta[0], self.oa[0]
 
-            self.pub_cmd_vel(di, ai)  # Publish command velocity
-
-            # self.state = update_state(self.state, ai, di, MPCConfig) # In Simulation
+            self.pub_cmd_vel(di, ai)
             self.state = self.get_state(self.robot_odom)
 
         except Exception as e:
             self.get_logger().error(f"Error in MPC control: {e}")
             self.pub_emergency_stop()
 
+    def publish_reference_pose(self):
+        """Publish current reference pose for tracking analysis"""
+        if self.current_reference is None:
+            return
+
+        ref_pose = PoseStamped()
+        ref_pose.header.stamp = self.get_clock().now().to_msg()
+        ref_pose.header.frame_id = "world"
+        ref_pose.pose.position.x = self.current_reference["x"]
+        ref_pose.pose.position.y = self.current_reference["y"]
+        ref_pose.pose.position.z = 0.0
+
+        q = quaternion_from_euler(0, 0, self.current_reference["yaw"])
+        ref_pose.pose.orientation.x = q[0]
+        ref_pose.pose.orientation.y = q[1]
+        ref_pose.pose.orientation.z = q[2]
+        ref_pose.pose.orientation.w = q[3]
+
+        self.reference_pub.publish(ref_pose)
+
     def timer_callback(self):
         """Timer callback for MPC control loop"""
-        # Check if robot odometry is available and initialized
         if (
             self.robot_odom is None
             or not hasattr(self.robot_odom, "pose")
@@ -440,7 +490,6 @@ class MPCNode(Node):
             return
 
         self.publish_path()
-
         self.mpc_control()
 
     def odom_callback(self, msg: Odometry):
@@ -460,9 +509,17 @@ class MPCNode(Node):
         return State(x=x, y=y, yaw=yaw, v=v)
 
     def pub_cmd_vel(self, di, ai):
-        """Publish command velocity with safety limits"""
-        # Safety limits and smoother control
-        self.linear_x = self.linear_x + ai * MPCConfig.DT  # Update linear velocity
+        """Publish command velocity with IMPROVED safety limits and smoother control"""
+        # More gradual velocity changes
+        target_linear_x = self.linear_x + ai * MPCConfig.DT
+
+        # Smoother velocity transitions
+        max_vel_change = 0.05  # Limit velocity change per timestep
+        vel_change = target_linear_x - self.linear_x
+        if abs(vel_change) > max_vel_change:
+            vel_change = max_vel_change if vel_change > 0 else -max_vel_change
+
+        self.linear_x = self.linear_x + vel_change
 
         # Apply safety limits
         self.linear_x = max(
@@ -472,7 +529,7 @@ class MPCNode(Node):
         msg = Twist()
         msg.linear.x = self.linear_x
 
-        # Calculate angular velocity with safety limits
+        # Calculate angular velocity with improved limits
         angular_z = self.linear_x * math.tan(di) / self.l
         angular_z = max(
             MPCConfig.MIN_ANGULAR_VEL, min(MPCConfig.MAX_ANGULAR_VEL, angular_z)
@@ -501,8 +558,10 @@ def main(args=None):
             )
             return
 
-        node.get_logger().info("MPC controller started successfully")
-        node.get_logger().info(f"Configuration: {MPCConfig.get_dict()}")
+        node.get_logger().info("IMPROVED MPC controller started successfully")
+        node.get_logger().info(
+            f"IMPROVED Configuration: Horizon={MPCConfig.T}, DT={MPCConfig.DT}, Target_Speed={MPCConfig.TARGET_SPEED}"
+        )
         rclpy.spin(node)
 
     except KeyboardInterrupt:

@@ -38,6 +38,7 @@ install(PROGRAMS
   scripts/ekf.py
   scripts/mpc_4states.py
   scripts/mpc_lib.py
+  scripts/path_tracking_measurement.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -60,6 +61,8 @@ install(DIRECTORY
   # add directories here
   launch
   path
+  scripts/PathPlanning
+  scripts/utils
   DESTINATION share/${PROJECT_NAME})
 
 ament_package()
