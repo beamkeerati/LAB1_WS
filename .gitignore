@@ -8,3 +8,5 @@
 *.pyc
 *.pyc
 /src/limo_controller/scripts/PathPlanning/__pycache__
+*.pyc
+/src/limo_controller/scripts/PathPlanning/__pycache__

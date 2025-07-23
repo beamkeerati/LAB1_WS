@@ -55,10 +55,11 @@ BACKTOWHEEL = 1.0  # [m]
 WHEEL_LEN = 0.3  # [m]
 WHEEL_WIDTH = 0.2  # [m]
 TREAD = 0.7  # [m]
-WB = 1.0  # [m]
-WHEEL_RADIUS = 0.3  # [m]
-WHEEL_BASE = 1.0  # [m]
-TRACK_WIDTH = 0.5  # [m] track width
+WB = 0.2  # [m]
+
+WHEEL_RADIUS = 0.045  # [m]
+WHEEL_BASE = 0.2  # [m]
+TRACK_WIDTH = 0.14  # [m] track width
 
 MAX_STEER = math.radians(10.0)  # maximum steering angle [rad]
 MAX_DSTEER = math.radians(30.0)  # maximum steering speed [rad/s]
@@ -121,6 +122,8 @@ class MPCNode(Node):
         self.target_ind = 0
         self.prev_linear_vel = 0.0  # previous linear velocity commands
         self.prev_angular_vel = 0.0  # previous angular velocity commands
+
+        self.linear_x = 0.0  # linear velocity command
 
         # Convert path to MPC format
         if self.path is not None:
@@ -217,7 +220,7 @@ class MPCNode(Node):
             self.state.yaw += math.pi * 2.0
 
         self.target_ind, _ = calc_nearest_index(self.state, self.cx, self.cy, self.cyaw, 0)
-        self.get_logger().info(f"{self.target_ind}")
+        # self.get_logger().info(f"{self.target_ind}")
 
         self.odelta, self.oa = None, None
 
@@ -259,6 +262,7 @@ class MPCNode(Node):
         di, ai = 0.0, 0.0
         if self.odelta is not None:
             di, ai = self.odelta[0], self.oa[0]
+            self.pub_cmd_vel(di, ai)  # Publish command velocity
 
             # self.state = update_state(self.state, ai, di) # In Simulation
             self.state = self.get_state(self.robot_odom)
@@ -290,6 +294,13 @@ class MPCNode(Node):
         v = robot_odom.twist.twist.linear.x
 
         return State(x=x, y=y, yaw=yaw, v=v)
+
+    def pub_cmd_vel(self, di, ai):
+        self.linear_x = self.linear_x + ai * DT  # Update linear velocity
+        msg = Twist()
+        msg.linear.x = self.linear_x
+        msg.angular.z = self.linear_x * math.tan(di) / self.l  # Convert steering angle to angular velocity
+        self.cmd_vel_pub.publish(msg)
 
 def main(args=None):
     try:
