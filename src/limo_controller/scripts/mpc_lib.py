@@ -192,6 +192,28 @@ def iterative_linear_mpc_control(xref, x0, dref, oa, od, config):
 def linear_mpc_control(xref, xbar, x0, dref, config):
     """Linear MPC control optimized for robot with 10-degree steering limit"""
     try:
+        # DEBUG: Check input values for sanity
+        print(f"=== MPC OPTIMIZATION DEBUG ===")
+        print(f"x0: [{x0[0]:.3f}, {x0[1]:.3f}, {x0[2]:.3f}, {x0[3]:.3f}]")
+        print(
+            f"xref[0]: [{xref[0,0]:.3f}, {xref[1,0]:.3f}, {xref[2,0]:.3f}, {xref[3,0]:.3f}]"
+        )
+        print(f"Speed range in ref: {np.min(xref[2,:]):.3f} to {np.max(xref[2,:]):.3f}")
+        print(
+            f"Constraints: v in [{config.MIN_SPEED:.3f}, {config.MAX_SPEED:.3f}], steer in [{-config.MAX_STEER:.3f}, {config.MAX_STEER:.3f}]"
+        )
+
+        # Check if current state violates constraints
+        if x0[2] > config.MAX_SPEED or x0[2] < config.MIN_SPEED:
+            print(f"WARNING: Current speed {x0[2]:.3f} violates constraints!")
+
+        # Check if reference speeds are reasonable
+        if np.any(xref[2, :] > config.MAX_SPEED) or np.any(
+            xref[2, :] < config.MIN_SPEED
+        ):
+            print(f"WARNING: Reference speeds violate constraints!")
+            print(f"Ref speeds: {xref[2,:]}")
+
         x = cvxpy.Variable((config.NX, config.T + 1))
         u = cvxpy.Variable((config.NU, config.T))
 
@@ -207,6 +229,18 @@ def linear_mpc_control(xref, xbar, x0, dref, config):
             A, B, C = get_linear_model_matrix(
                 xbar[2, t], xbar[3, t], dref[0, t], config
             )
+
+            # DEBUG: Check for problematic matrices
+            if t == 0:
+                print(f"A matrix condition number: {np.linalg.cond(A):.2e}")
+                print(f"B matrix condition number: {np.linalg.cond(B):.2e}")
+                if np.any(np.isnan(A)) or np.any(np.isinf(A)):
+                    print("WARNING: A matrix contains NaN or inf!")
+                if np.any(np.isnan(B)) or np.any(np.isinf(B)):
+                    print("WARNING: B matrix contains NaN or inf!")
+                if np.any(np.isnan(C)) or np.any(np.isinf(C)):
+                    print("WARNING: C vector contains NaN or inf!")
+
             constraints += [x[:, t + 1] == A @ x[:, t] + B @ u[:, t] + C]
 
             # Relaxed steering rate constraint
@@ -221,43 +255,111 @@ def linear_mpc_control(xref, xbar, x0, dref, config):
         # Initial state constraint
         constraints += [x[:, 0] == x0]
 
-        # Relaxed speed constraints with safety margins
-        speed_margin = 0.1
+        # More appropriate speed constraints with smaller safety margins
+        speed_margin = 0.1  # Smaller margin now that range is larger
         constraints += [x[2, :] <= config.MAX_SPEED - speed_margin]
         constraints += [x[2, :] >= config.MIN_SPEED + speed_margin]
 
-        # Conservative control constraints for 10-degree steering limit
-        accel_margin = 0.05
-        steer_margin = 0.02  # Smaller margin for limited steering range
+        # More appropriate control constraints for 10-degree steering limit
+        accel_margin = 0.05  # Smaller margin
+        steer_margin = 0.02  # Smaller margin for steering
         constraints += [cvxpy.abs(u[0, :]) <= config.MAX_ACCEL - accel_margin]
         constraints += [cvxpy.abs(u[1, :]) <= config.MAX_STEER - steer_margin]
 
         prob = cvxpy.Problem(cvxpy.Minimize(cost), constraints)
 
+        # DEBUG: Check problem structure
+        print(f"Problem variables: {len(prob.variables())}")
+        print(f"Problem constraints: {len(prob.constraints)}")
+        print(f"Is DCP: {prob.is_dcp()}")
+
         # Try multiple solvers with improved settings
         solvers_to_try = [
-            (cvxpy.CLARABEL, {"verbose": False, "max_iter": 2000, "tol_feas": 1e-6}),
+            (
+                cvxpy.CLARABEL,
+                {"verbose": False, "max_iter": 5000, "tol_feas": 1e-4, "tol_gap": 1e-4},
+            ),
             (
                 cvxpy.OSQP,
-                {"verbose": False, "max_iter": 2000, "eps_abs": 1e-5, "eps_rel": 1e-5},
+                {
+                    "verbose": False,
+                    "max_iter": 5000,
+                    "eps_abs": 1e-4,
+                    "eps_rel": 1e-4,
+                    "adaptive_rho": True,
+                },
             ),
-            (cvxpy.SCS, {"verbose": False, "max_iters": 2000, "eps": 1e-5}),
-            (cvxpy.ECOS, {"verbose": False, "max_iters": 2000}),
+            (
+                cvxpy.SCS,
+                {"verbose": False, "max_iters": 5000, "eps": 1e-4, "normalize": True},
+            ),
+            (cvxpy.ECOS, {"verbose": False, "max_iters": 5000, "feastol": 1e-4}),
         ]
 
         solved = False
         for solver, solver_opts in solvers_to_try:
             try:
+                print(f"Trying solver: {solver}")
                 prob.solve(solver=solver, **solver_opts)
+
+                print(f"Solver status: {prob.status}")
+                print(f"Solver value: {prob.value}")
 
                 if (
                     prob.status == cvxpy.OPTIMAL
                     or prob.status == cvxpy.OPTIMAL_INACCURATE
                 ):
                     solved = True
+                    print(f"✓ Solver {solver} succeeded")
                     break
                 else:
-                    print(f"Solver {solver} failed with status: {prob.status}")
+                    print(f"✗ Solver {solver} failed with status: {prob.status}")
+
+                    # Additional debugging for infeasible problems
+                    if prob.status == cvxpy.INFEASIBLE:
+                        print("Problem is infeasible - checking constraints...")
+
+                        # Try to identify which constraints are causing infeasibility
+                        # Relax speed constraints further
+                        relaxed_constraints = []
+                        relaxed_constraints += [x[:, 0] == x0]
+
+                        # Very relaxed speed constraints
+                        relaxed_constraints += [x[2, :] <= config.MAX_SPEED + 0.5]
+                        relaxed_constraints += [x[2, :] >= config.MIN_SPEED - 0.5]
+
+                        # Very relaxed control constraints
+                        relaxed_constraints += [
+                            cvxpy.abs(u[0, :]) <= config.MAX_ACCEL + 0.5
+                        ]
+                        relaxed_constraints += [
+                            cvxpy.abs(u[1, :]) <= config.MAX_STEER + 0.1
+                        ]
+
+                        # Add dynamics constraints
+                        for t in range(config.T):
+                            A, B, C = get_linear_model_matrix(
+                                xbar[2, t], xbar[3, t], dref[0, t], config
+                            )
+                            relaxed_constraints += [
+                                x[:, t + 1] == A @ x[:, t] + B @ u[:, t] + C
+                            ]
+
+                        relaxed_prob = cvxpy.Problem(
+                            cvxpy.Minimize(cost), relaxed_constraints
+                        )
+                        relaxed_prob.solve(solver=solver, **solver_opts)
+                        print(f"Relaxed problem status: {relaxed_prob.status}")
+
+                        if relaxed_prob.status == cvxpy.INFEASIBLE:
+                            print(
+                                "Even relaxed problem is infeasible - likely dynamics issue"
+                            )
+                        else:
+                            print(
+                                "Relaxed problem is feasible - constraint bounds too tight"
+                            )
+
             except Exception as e:
                 print(f"Solver {solver} encountered error: {e}")
                 continue
@@ -269,12 +371,24 @@ def linear_mpc_control(xref, xbar, x0, dref, config):
             oyaw = get_nparray_from_matrix(x.value[3, :])
             oa = get_nparray_from_matrix(u.value[0, :])
             odelta = get_nparray_from_matrix(u.value[1, :])
+
+            # DEBUG: Check solution sanity
+            print(f"Solution found:")
+            print(f"  Acceleration range: {np.min(oa):.3f} to {np.max(oa):.3f}")
+            print(
+                f"  Steering range: {np.min(odelta):.3f} to {np.max(odelta):.3f} ({np.degrees(np.min(odelta)):.1f} to {np.degrees(np.max(odelta)):.1f} deg)"
+            )
+            print(f"  Speed range: {np.min(ov):.3f} to {np.max(ov):.3f}")
+
         else:
             print("Error: Cannot solve mpc with any available solver")
             oa, odelta, ox, oy, oyaw, ov = None, None, None, None, None, None
 
     except Exception as e:
         print(f"MPC optimization error: {e}")
+        import traceback
+
+        traceback.print_exc()
         oa, odelta, ox, oy, oyaw, ov = None, None, None, None, None, None
 
     return oa, odelta, ox, oy, oyaw, ov
@@ -296,7 +410,9 @@ def calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, pind, config):
 
     xref[0, 0] = cx[ind]
     xref[1, 0] = cy[ind]
-    xref[2, 0] = sp[ind]
+    # IMPORTANT: Clamp reference speed to respect constraints
+    ref_speed = max(config.MIN_SPEED + 0.1, min(config.MAX_SPEED - 0.1, sp[ind]))
+    xref[2, 0] = ref_speed
     xref[3, 0] = cyaw[ind]
     dref[0, 0] = 0.0
 
@@ -309,15 +425,30 @@ def calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, pind, config):
         if (ind + dind) < ncourse:
             xref[0, i] = cx[ind + dind]
             xref[1, i] = cy[ind + dind]
-            xref[2, i] = sp[ind + dind]
+            # IMPORTANT: Clamp reference speed to respect constraints
+            ref_speed = max(
+                config.MIN_SPEED + 0.1, min(config.MAX_SPEED - 0.1, sp[ind + dind])
+            )
+            xref[2, i] = ref_speed
             xref[3, i] = cyaw[ind + dind]
             dref[0, i] = 0.0
         else:
             xref[0, i] = cx[ncourse - 1]
             xref[1, i] = cy[ncourse - 1]
-            xref[2, i] = sp[ncourse - 1]
+            # IMPORTANT: Clamp reference speed to respect constraints
+            ref_speed = max(
+                config.MIN_SPEED + 0.1, min(config.MAX_SPEED - 0.1, sp[ncourse - 1])
+            )
+            xref[2, i] = ref_speed
             xref[3, i] = cyaw[ncourse - 1]
             dref[0, i] = 0.0
+
+    # DEBUG: Verify reference trajectory is within constraints
+    ref_speeds = xref[2, :]
+    if not all(config.MIN_SPEED <= s <= config.MAX_SPEED for s in ref_speeds):
+        print(f"WARNING: Reference trajectory still has constraint violations!")
+        print(f"Speed range: {np.min(ref_speeds):.3f} to {np.max(ref_speeds):.3f}")
+        print(f"Constraints: {config.MIN_SPEED:.3f} to {config.MAX_SPEED:.3f}")
 
     return xref, ind, dref
 
@@ -342,9 +473,15 @@ def check_goal(state, goal, tind, nind, config):
 
 
 def calc_speed_profile(cx, cy, cyaw, target_speed, config):
-    """Calculate speed profile with direction handling"""
+    """Calculate speed profile with direction handling and constraint compliance"""
     speed_profile = [target_speed] * len(cx)
     direction = 1.0
+
+    # DEBUG: Log speed profile calculation
+    print(f"=== SPEED PROFILE DEBUG ===")
+    print(f"Target speed: {target_speed}")
+    print(f"Path length: {len(cx)}")
+    print(f"Speed constraints: {config.MIN_SPEED:.3f} to {config.MAX_SPEED:.3f}")
 
     for i in range(len(cx) - 1):
         dx = cx[i + 1] - cx[i]
@@ -365,6 +502,21 @@ def calc_speed_profile(cx, cy, cyaw, target_speed, config):
             speed_profile[i] = target_speed
 
     speed_profile[-1] = 0.0
+
+    # IMPORTANT: Clamp speeds to respect constraints
+    for i in range(len(speed_profile)):
+        speed_profile[i] = max(
+            config.MIN_SPEED, min(config.MAX_SPEED, speed_profile[i])
+        )
+
+    # DEBUG: Log speed profile statistics
+    forward_count = sum(1 for s in speed_profile if s > 0)
+    reverse_count = sum(1 for s in speed_profile if s < 0)
+    print(f"Speed profile: {forward_count} forward, {reverse_count} reverse points")
+    print(f"Speed range: {min(speed_profile):.3f} to {max(speed_profile):.3f}")
+    print(
+        f"All speeds within constraints: {all(config.MIN_SPEED <= s <= config.MAX_SPEED for s in speed_profile)}"
+    )
 
     return speed_profile
 

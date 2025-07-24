@@ -69,13 +69,13 @@ class MPCConfig:
     NU = 2  # a = [accel, steer]
     T = 10  # Increased horizon for better lookahead
 
-    # MPC Cost Matrices - Rebalanced for tighter steering constraints
-    R = np.diag([0.01, 0.5])  # Lower accel cost, higher steering cost
-    Rd = np.diag([0.01, 1.0])  # Lower accel rate, higher steering rate penalty
+    # MPC Cost Matrices - More aggressive tracking weights
+    R = np.diag([0.1, 1.0])  # Higher control costs to smooth commands
+    Rd = np.diag([0.1, 2.0])  # Higher rate penalties for smoothness
     Q = np.diag(
-        [1.0, 1.0, 0.3, 0.8]
-    )  # Moderate pos tracking, lower speed weight, higher yaw weight
-    Qf = Q  # Terminal cost
+        [10.0, 10.0, 1.0, 15.0]  # MUCH higher position and yaw tracking weights
+    )
+    Qf = Q * 2.0  # Even higher terminal cost for better convergence
 
     # Goal and Stopping Parameters
     GOAL_DIS = 1.5
@@ -86,9 +86,9 @@ class MPCConfig:
     MAX_ITER = 3
     DU_TH = 0.1
 
-    # Speed Parameters - More conservative
-    TARGET_SPEED = 1.0  # Reduced from 1.5 for stability
-    N_IND_SEARCH = 20
+    # Speed Parameters - More conservative for better tracking
+    TARGET_SPEED = 0.5  # Reduced for better path following
+    N_IND_SEARCH = 30  # Increased search range
 
     # Time Step
     DT = 0.1  # Reduced for better stability
@@ -107,16 +107,16 @@ class MPCConfig:
     WHEEL_BASE = 0.2
     TRACK_WIDTH = 0.14
 
-    # Control Constraints - Matched to robot description from kinematics
+    # Control Constraints - FIXED to allow reverse speeds that match path requirements
     MAX_STEER = np.deg2rad(10.0)  # Matches inverse_kinematics.py constraint
     MAX_DSTEER = np.deg2rad(30.0)  # Reasonable steering rate limit
     MAX_SPEED = 1.5  # Conservative speed limit for small robot
-    MIN_SPEED = -0.5  # Limited reverse speed
+    MIN_SPEED = -1.5  # FIXED: Allow full reverse speed to match path requirements
     MAX_ACCEL = 1.5  # Conservative acceleration limit
 
     # For cmd_vel output limits - matched to robot capabilities
     MAX_LINEAR_VEL = 1.0  # Conservative for small robot
-    MIN_LINEAR_VEL = -0.5  # Limited reverse
+    MIN_LINEAR_VEL = -1.0  # FIXED: Allow reverse to match path
     MAX_ANGULAR_VEL = 0.8  # Reasonable turning rate
     MIN_ANGULAR_VEL = -0.8
 
@@ -234,6 +234,14 @@ class MPCNode(Node):
             else "Path not loaded!"
         )
 
+        # DEBUG: Log first few path points
+        if self.path is not None:
+            self.get_logger().info("=== PATH DEBUG ===")
+            for i in range(min(5, len(self.path))):
+                self.get_logger().info(
+                    f"Path[{i}]: x={self.path[i,0]:.3f}, y={self.path[i,1]:.3f}, yaw={self.path[i,2]:.3f}"
+                )
+
         # Publish the full path
         self.publish_path()
 
@@ -256,6 +264,11 @@ class MPCNode(Node):
 
         # Variables for reference tracking
         self.current_reference = None
+
+        # DEBUG: Add control loop counter
+        self.control_loop_count = 0
+        self.stuck_counter = 0  # Track if robot gets stuck
+        self.last_target_ind = 0
 
         # Initialize MPC
         if self.path is not None:
@@ -342,6 +355,19 @@ class MPCNode(Node):
         self.dl = calculate_path_distance(self.cx, self.cy)
         self.cyaw = smooth_yaw(self.cyaw, MPCConfig)
 
+        # DEBUG: Log path statistics
+        self.get_logger().info("=== PATH INIT DEBUG ===")
+        self.get_logger().info(f"Path length: {len(self.cx)} points")
+        self.get_logger().info(f"Average distance between points: {self.dl:.4f}")
+        self.get_logger().info(
+            f"Speed profile range: {min(self.sp):.3f} to {max(self.sp):.3f}"
+        )
+        self.get_logger().info(f"X range: {min(self.cx):.3f} to {max(self.cx):.3f}")
+        self.get_logger().info(f"Y range: {min(self.cy):.3f} to {max(self.cy):.3f}")
+        self.get_logger().info(
+            f"Yaw range: {min(self.cyaw):.3f} to {max(self.cyaw):.3f}"
+        )
+
         self.get_logger().info(
             "MPC Controller initialized with robot-matched parameters"
         )
@@ -364,6 +390,13 @@ class MPCNode(Node):
         self.goal = [self.cx[-1], self.cy[-1]]
         self.state = initial_state
 
+        # DEBUG: Log initial state setup
+        self.get_logger().info("=== MPC INIT DEBUG ===")
+        self.get_logger().info(
+            f"Initial state: x={self.state.x:.3f}, y={self.state.y:.3f}, yaw={self.state.yaw:.3f}, v={self.state.v:.3f}"
+        )
+        self.get_logger().info(f"Goal: x={self.goal[0]:.3f}, y={self.goal[1]:.3f}")
+
         # Initial yaw compensation
         if self.state.yaw - self.cyaw[0] >= math.pi:
             self.state.yaw -= math.pi * 2.0
@@ -373,7 +406,7 @@ class MPCNode(Node):
         self.target_ind, _ = calc_nearest_index(
             self.state, self.cx, self.cy, self.cyaw, 0, MPCConfig
         )
-
+        self.get_logger().info(f"Initial target index: {self.target_ind}")
         self.odelta, self.oa = None, None
 
     def check_goal(self, state, goal, tind, nind):
@@ -410,9 +443,20 @@ class MPCNode(Node):
 
         try:
             self.current_state = self.get_state(self.robot_odom)
+            # IMPORTANT: Update the MPC state with current robot state
+            self.state = self.current_state
         except Exception as e:
             self.get_logger().error(f"Error reading odometry: {e}")
             return
+
+        # DEBUG: Log current state every 10 iterations
+        self.control_loop_count += 1
+        if self.control_loop_count % 10 == 1:
+            self.get_logger().info("=== CONTROL LOOP DEBUG ===")
+            self.get_logger().info(
+                f"Loop {self.control_loop_count}: Robot state: x={self.current_state.x:.3f}, y={self.current_state.y:.3f}, yaw={self.current_state.yaw:.3f}, v={self.current_state.v:.3f}"
+            )
+            self.get_logger().info(f"Target index: {self.target_ind}/{len(self.cx)}")
 
         # Check if goal reached
         if self.check_goal(self.state, self.goal, self.target_ind, len(self.cx)):
@@ -433,6 +477,40 @@ class MPCNode(Node):
                 MPCConfig,
             )
 
+            # Check if robot is stuck at same target index
+            if self.target_ind == self.last_target_ind:
+                self.stuck_counter += 1
+                if self.stuck_counter > 20:  # Stuck for 2 seconds
+                    self.get_logger().warn(
+                        f"Robot stuck at index {self.target_ind}, forcing advancement"
+                    )
+                    self.target_ind = min(self.target_ind + 2, len(self.cx) - 1)
+                    self.stuck_counter = 0
+            else:
+                self.stuck_counter = 0
+                self.last_target_ind = self.target_ind
+
+            # DEBUG: Log reference trajectory details every 10 iterations
+            if self.control_loop_count % 10 == 1:
+                self.get_logger().info("=== REFERENCE TRAJECTORY DEBUG ===")
+                self.get_logger().info(
+                    f"Ref[0]: x={xref[0,0]:.3f}, y={xref[1,0]:.3f}, v={xref[2,0]:.3f}, yaw={xref[3,0]:.3f}"
+                )
+                self.get_logger().info(
+                    f"Ref[1]: x={xref[0,1]:.3f}, y={xref[1,1]:.3f}, v={xref[2,1]:.3f}, yaw={xref[3,1]:.3f}"
+                )
+                self.get_logger().info(f"Target index updated to: {self.target_ind}")
+
+                # Check for problematic reference values
+                ref_speeds = xref[2, :]
+                ref_yaws = xref[3, :]
+                self.get_logger().info(
+                    f"Speed range in horizon: {np.min(ref_speeds):.3f} to {np.max(ref_speeds):.3f}"
+                )
+                self.get_logger().info(
+                    f"Yaw range in horizon: {np.min(ref_yaws):.3f} to {np.max(ref_yaws):.3f}"
+                )
+
             # Store current reference for tracking analysis
             self.current_reference = {
                 "x": float(xref[0, 0]),
@@ -452,6 +530,30 @@ class MPCNode(Node):
                 self.state.yaw,
             ]
 
+            # DEBUG: Log tracking errors every 20 iterations
+            if self.control_loop_count % 20 == 1:
+                self.get_logger().info("=== TRACKING ERROR DEBUG ===")
+                pos_error = math.sqrt(
+                    (x0[0] - xref[0, 0]) ** 2 + (x0[1] - xref[1, 0]) ** 2
+                )
+                speed_error = abs(x0[2] - xref[2, 0])
+                yaw_error = abs(x0[3] - xref[3, 0])
+                self.get_logger().info(f"Position error: {pos_error:.3f}m")
+                self.get_logger().info(f"Speed error: {speed_error:.3f}m/s")
+                self.get_logger().info(
+                    f"Yaw error: {yaw_error:.3f}rad ({math.degrees(yaw_error):.1f}deg)"
+                )
+                self.get_logger().info(
+                    f"Target index: {self.target_ind}/{len(self.cx)} (stuck_counter: {self.stuck_counter})"
+                )
+
+                if yaw_error > math.pi / 2:
+                    self.get_logger().warn(
+                        "Large yaw error detected - possible path discontinuity"
+                    )
+                if pos_error > 2.0:
+                    self.get_logger().warn("Large position error - robot far from path")
+
             self.oa, self.odelta, ox, oy, oyaw, ov = iterative_linear_mpc_control(
                 xref, x0, dref, self.oa, self.odelta, MPCConfig
             )
@@ -460,6 +562,21 @@ class MPCNode(Node):
                 self.mpc_failed_count += 1
                 self.get_logger().warn(
                     f"MPC control failed ({self.mpc_failed_count}/{self.max_mpc_failures})"
+                )
+
+                # DEBUG: Log why MPC failed
+                self.get_logger().error("=== MPC FAILURE DEBUG ===")
+                self.get_logger().error(
+                    f"Current state: x={x0[0]:.3f}, y={x0[1]:.3f}, v={x0[2]:.3f}, yaw={x0[3]:.3f}"
+                )
+                self.get_logger().error(
+                    f"Reference: x={xref[0,0]:.3f}, y={xref[1,0]:.3f}, v={xref[2,0]:.3f}, yaw={xref[3,0]:.3f}"
+                )
+                self.get_logger().error(
+                    f"Speed constraints: {MPCConfig.MIN_SPEED:.3f} <= v <= {MPCConfig.MAX_SPEED:.3f}"
+                )
+                self.get_logger().error(
+                    f"Steering constraints: {-MPCConfig.MAX_STEER:.3f} <= delta <= {MPCConfig.MAX_STEER:.3f}"
                 )
 
                 if self.mpc_failed_count >= self.max_mpc_failures:
@@ -476,8 +593,16 @@ class MPCNode(Node):
                 self.mpc_failed_count = 0
                 di, ai = self.odelta[0], self.oa[0]
 
+                # DEBUG: Log successful control outputs
+                if self.control_loop_count % 10 == 1:
+                    self.get_logger().info("=== CONTROL OUTPUT DEBUG ===")
+                    self.get_logger().info(f"Acceleration: {ai:.3f} m/s²")
+                    self.get_logger().info(
+                        f"Steering: {di:.3f} rad ({math.degrees(di):.1f} deg)"
+                    )
+
             self.pub_cmd_vel(di, ai)
-            self.state = self.get_state(self.robot_odom)
+            # State is already updated at the beginning of the function
 
         except Exception as e:
             self.get_logger().error(f"Error in MPC control: {e}")
@@ -560,6 +685,12 @@ class MPCNode(Node):
             MPCConfig.MIN_ANGULAR_VEL, min(MPCConfig.MAX_ANGULAR_VEL, angular_z)
         )
         msg.angular.z = angular_z
+
+        # DEBUG: Log command velocities
+        if self.control_loop_count % 10 == 1:
+            self.get_logger().info(
+                f"Command: linear_x={msg.linear.x:.3f}, angular_z={msg.angular.z:.3f}"
+            )
 
         self.cmd_vel_pub.publish(msg)
 
