@@ -106,7 +106,7 @@ def generate_launch_description():
     # Add all nodes
     ld.add_action(limo_description)
     ld.add_action(odom)
-    ld.add_action(mpc)  # Now using improved MPC
+    # ld.add_action(mpc)  # Now using improved MPC
     ld.add_action(inv_kin)
 
     # Conditionally add tracking measurement

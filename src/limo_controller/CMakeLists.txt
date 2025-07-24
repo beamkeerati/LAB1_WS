@@ -57,25 +57,28 @@ install(TARGETS
 )
 
 ################ INSTALL LAUNCH, ETC #################
-# install(DIRECTORY
-#   # add directories here
-#   launch
-#   path
-#   scripts/PathPlanning
-#   scripts/utils
-#   DESTINATION share/${PROJECT_NAME})
-
-# Install Python packages to the same location as executables
 install(DIRECTORY
+  # add directories here
   launch
   path
   scripts/PathPlanning
   scripts/utils
-  DESTINATION lib/${PROJECT_NAME}  # Same as executables
-  USE_SOURCE_PERMISSIONS
-  FILES_MATCHING
+  DESTINATION share/${PROJECT_NAME}
+  # FILES_MATCHING
   PATTERN "*.py"
   PATTERN "__pycache__" EXCLUDE
-)
+  )
+# Install Python packages to the same location as executables
+# install(DIRECTORY
+#   launch
+#   path
+#   scripts/PathPlanning
+#   scripts/utils
+#   DESTINATION lib/${PROJECT_NAME}  # Same as executables
+#   USE_SOURCE_PERMISSIONS
+#   FILES_MATCHING
+#   PATTERN "*.py"
+#   PATTERN "__pycache__" EXCLUDE
+# )
 
 ament_package()

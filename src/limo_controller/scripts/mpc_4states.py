@@ -126,65 +126,70 @@ except ImportError as e:
 
 
 # ============================================================================
-# IMPROVED PARAMETER CONFIGURATION FOR BETTER TRACKING
+# SYNCED PARAMETER CONFIGURATION WITH ROBOT DESCRIPTION AND WORKING EXAMPLE
 # ============================================================================
 class MPCConfig:
-    """Improved configuration class for better MPC path tracking"""
+    """Configuration synced with robot URDF and working example"""
 
     # State and Control Dimensions
     NX = 4  # x = x, y, v, yaw
     NU = 2  # a = [accel, steer]
-    T = 25  # INCREASED horizon length for better lookahead
+    T = 5  # horizon length (same as working example)
 
-    # IMPROVED MPC Cost Matrices for better tracking
-    R = np.diag([10, 1])  # Less aggressive accel, smoother steer
-    Rd = np.diag([0.03, 0.35])  # Smooth control changes
-    Q = np.diag([40.0, 40.0, 10.0, 100.0])  # 4x position, 7x yaw tracking
-    Qf = np.diag([60.0, 60.0, 1.2, 50.0])  # Strong terminal costs
+    # MPC Cost Matrices - Balanced between tracking and smoothness
+    R = np.diag([0.01, 0.01])  # Low control cost (from working example)
+    Rd = np.diag([0.01, 1.0])  # Control rate change cost (from working example)
+    Q = np.diag(
+        [1.0, 1.0, 0.5, 0.5]
+    )  # Moderate tracking weights (from working example)
+    Qf = Q  # Terminal cost same as stage cost
 
     # Goal and Stopping Parameters
-    GOAL_DIS = 1.0  # REDUCED for more precise goal reaching
-    STOP_SPEED = 0.5  # REDUCED stop speed
+    GOAL_DIS = 1.5  # Same as working example
+    STOP_SPEED = 0.5 / 3.6  # Same as working example (0.139 m/s)
     MAX_TIME = 500.0
 
     # Iterative Parameters
-    MAX_ITER = 5  # INCREASED for better convergence
-    DU_TH = 0.05  # REDUCED threshold for more precise convergence
+    MAX_ITER = 3  # Same as working example
+    DU_TH = 0.1  # Same as working example
 
-    # Speed Parameters
-    TARGET_SPEED = 0.6  # REDUCED target speed for better tracking
-    N_IND_SEARCH = 15  # INCREASED search range
+    # Speed Parameters - Adjusted for small robot
+    TARGET_SPEED = 1.5  # 2.78 m/s from working example
+    N_IND_SEARCH = 10  # Same as working example
 
-    # Time Step
-    DT = 0.04  # INCREASED time step for more reasonable horizon
+    # Time Step - Balance between computation and lookahead
+    DT = 0.2  # Same as working example for good lookahead
 
-    # Vehicle Physical Parameters
-    LENGTH = 4.5
-    WIDTH = 2.0
-    BACKTOWHEEL = 1.0
-    WHEEL_LEN = 0.3
-    WHEEL_WIDTH = 0.2
-    TREAD = 0.7
-    WB = 0.2
+    # Vehicle Physical Parameters FROM ROBOT DESCRIPTION
+    LENGTH = 0.13  # base_x_size from URDF
+    WIDTH = 0.12  # base_y_size from URDF
+    BACKTOWHEEL = 0.065  # Half of base length
+    WHEEL_LEN = 0.045  # From URDF
+    WHEEL_WIDTH = 0.045  # From URDF (wheel_length in URDF)
+    TREAD = 0.14  # track width from URDF
+    WB = 0.2  # wheelbase from URDF - KEEP THIS!
 
-    # Robot-specific Parameters
-    WHEEL_RADIUS = 0.045
-    WHEEL_BASE = 0.2
-    TRACK_WIDTH = 0.14
+    # Robot-specific Parameters FROM URDF
+    WHEEL_RADIUS = 0.045  # From URDF
+    WHEEL_BASE = 0.2  # From URDF
+    TRACK_WIDTH = 0.14  # From URDF
 
-    # IMPROVED Control Constraints
-    MAX_STEER = math.radians(10.0)  # REDUCED max steering for smoother control
-    MAX_DSTEER = math.radians(10.0)  # REDUCED steering rate for smoother control
-    MAX_SPEED = 1.0  # Slightly increased
-    MIN_SPEED = -1.0  # Limited reverse speed
-    MAX_ACCEL = 0.1  # REDUCED max acceleration for smoother control
-    MAX_LINEAR_VEL = 1.0
-    MIN_LINEAR_VEL = -1.0
-    MAX_ANGULAR_VEL = math.radians(15)  # INCREASED for better turning
-    MIN_ANGULAR_VEL = -math.radians(15)
+    # Control Constraints FROM ROBOT URDF AND WORKING EXAMPLE
+    # URDF steering limit: ±0.523598767 radians = ±30 degrees
+    MAX_STEER = 0.523598767  # 30 degrees from URDF steering joint limits
+    MAX_DSTEER = np.deg2rad(30.0)  # From working example
+    MAX_SPEED = 1.0  # From working example (15.28 m/s)
+    MIN_SPEED = -0.3  # From working example (-5.56 m/s)
+    MAX_ACCEL = 1.0  # From working example
+
+    # For cmd_vel output limits
+    MAX_LINEAR_VEL = 5.0  # Reasonable for small robot
+    MIN_LINEAR_VEL = -2.0  # Limited reverse
+    MAX_ANGULAR_VEL = 5.0  # Reasonable turning rate
+    MIN_ANGULAR_VEL = -5.0
 
     # Safety Parameters
-    MAX_MPC_FAILURES = 5  # REDUCED for faster response to failures
+    MAX_MPC_FAILURES = 5
 
     @classmethod
     def get_dict(cls):
@@ -229,7 +234,6 @@ class MPCConfig:
                 cls.MAX_SPEED = (
                     node.get_parameter("max_speed").get_parameter_value().double_value
                 )
-                cls.MAX_LINEAR_VEL = cls.MAX_SPEED
                 node.get_logger().info(f"Updated MAX_SPEED to {cls.MAX_SPEED}")
 
             # Update max steering if provided
@@ -241,24 +245,6 @@ class MPCConfig:
                 )
                 cls.MAX_STEER = math.radians(max_steer_deg)
                 node.get_logger().info(f"Updated MAX_STEER to {max_steer_deg} degrees")
-
-            # Add tracking weight parameters
-            if node.has_parameter("position_weight"):
-                pos_weight = (
-                    node.get_parameter("position_weight")
-                    .get_parameter_value()
-                    .double_value
-                )
-                cls.Q[0, 0] = pos_weight
-                cls.Q[1, 1] = pos_weight
-                node.get_logger().info(f"Updated position weight to {pos_weight}")
-
-            if node.has_parameter("yaw_weight"):
-                yaw_weight = (
-                    node.get_parameter("yaw_weight").get_parameter_value().double_value
-                )
-                cls.Q[3, 3] = yaw_weight
-                node.get_logger().info(f"Updated yaw weight to {yaw_weight}")
 
         except Exception as e:
             node.get_logger().warn(f"Error updating parameters from ROS: {e}")
@@ -273,12 +259,38 @@ if "State" not in globals():
             self.y = y
             self.yaw = yaw
             self.v = v
+            self.predelta = None
 
 
 if "calc_speed_profile" not in globals():
 
     def calc_speed_profile(cx, cy, cyaw, target_speed, config):
-        return [target_speed] * len(cx)
+        """Calculate speed profile with direction changes for sharp turns"""
+        speed_profile = [target_speed] * len(cx)
+        direction = 1.0  # forward
+
+        # Set stop point
+        for i in range(len(cx) - 1):
+            dx = cx[i + 1] - cx[i]
+            dy = cy[i + 1] - cy[i]
+
+            move_direction = math.atan2(dy, dx)
+
+            if dx != 0.0 and dy != 0.0:
+                dangle = abs(angle_mod(move_direction - cyaw[i]))
+                if dangle >= math.pi / 4.0:
+                    direction = -1.0
+                else:
+                    direction = 1.0
+
+            if direction != 1.0:
+                speed_profile[i] = -target_speed
+            else:
+                speed_profile[i] = target_speed
+
+        speed_profile[-1] = 0.0
+
+        return speed_profile
 
 
 if "calculate_path_distance" not in globals():
@@ -297,56 +309,295 @@ if "calculate_path_distance" not in globals():
 if "smooth_yaw" not in globals():
 
     def smooth_yaw(yaw, config):
-        return yaw  # Simple passthrough
+        """Smooth yaw angles to prevent discontinuities"""
+        for i in range(len(yaw) - 1):
+            dyaw = yaw[i + 1] - yaw[i]
+
+            while dyaw >= math.pi / 2.0:
+                yaw[i + 1] -= math.pi * 2.0
+                dyaw = yaw[i + 1] - yaw[i]
+
+            while dyaw <= -math.pi / 2.0:
+                yaw[i + 1] += math.pi * 2.0
+                dyaw = yaw[i + 1] - yaw[i]
+
+        return yaw
 
 
 if "calc_nearest_index" not in globals():
 
     def calc_nearest_index(state, cx, cy, cyaw, pind, config):
-        min_dist = float("inf")
-        min_index = 0
-        for i in range(len(cx)):
-            dist = math.sqrt((state.x - cx[i]) ** 2 + (state.y - cy[i]) ** 2)
-            if dist < min_dist:
-                min_dist = dist
-                min_index = i
-        return min_index, min_dist
+        """Calculate nearest index with proper search range"""
+        search_range = min(config.N_IND_SEARCH, len(cx) - pind)
+        dx = [state.x - icx for icx in cx[pind : (pind + search_range)]]
+        dy = [state.y - icy for icy in cy[pind : (pind + search_range)]]
+
+        d = [idx**2 + idy**2 for (idx, idy) in zip(dx, dy)]
+
+        mind = min(d)
+        ind = d.index(mind) + pind
+
+        mind = math.sqrt(mind)
+
+        dxl = cx[ind] - state.x
+        dyl = cy[ind] - state.y
+
+        angle = angle_mod(cyaw[ind] - math.atan2(dyl, dxl))
+        if angle < 0:
+            mind *= -1
+
+        return ind, mind
 
 
 if "calc_ref_trajectory" not in globals():
 
     def calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, pind, config):
+        """Calculate reference trajectory"""
         xref = np.zeros((config.NX, config.T + 1))
         dref = np.zeros((1, config.T + 1))
+        ncourse = len(cx)
 
-        # Simple reference trajectory - just use current position
+        ind, _ = calc_nearest_index(state, cx, cy, cyaw, pind, config)
+
+        if pind >= ind:
+            ind = pind
+
+        xref[0, 0] = cx[ind]
+        xref[1, 0] = cy[ind]
+        xref[2, 0] = sp[ind]
+        xref[3, 0] = cyaw[ind]
+        dref[0, 0] = 0.0  # steer operational point should be 0
+
+        travel = 0.0
+
         for i in range(config.T + 1):
-            idx = min(pind + i, len(cx) - 1)
-            xref[0, i] = cx[idx]
-            xref[1, i] = cy[idx]
-            xref[2, i] = sp[idx] if idx < len(sp) else 0.8
-            xref[3, i] = cyaw[idx]
-            dref[0, i] = 0.0
+            travel += abs(state.v) * config.DT
+            dind = int(round(travel / dl))
 
-        return xref, pind, dref
+            if (ind + dind) < ncourse:
+                xref[0, i] = cx[ind + dind]
+                xref[1, i] = cy[ind + dind]
+                xref[2, i] = sp[ind + dind]
+                xref[3, i] = cyaw[ind + dind]
+                dref[0, i] = 0.0
+            else:
+                xref[0, i] = cx[ncourse - 1]
+                xref[1, i] = cy[ncourse - 1]
+                xref[2, i] = sp[ncourse - 1]
+                xref[3, i] = cyaw[ncourse - 1]
+                dref[0, i] = 0.0
+
+        return xref, ind, dref
 
 
 if "iterative_linear_mpc_control" not in globals():
 
     def iterative_linear_mpc_control(xref, x0, dref, oa, od, config):
-        # Simple fallback controller
-        if oa is None:
-            oa = [0.1] * config.T  # Small acceleration
-        if od is None:
-            od = [0.0] * config.T  # No steering
+        """MPC control with updating operational point iteratively"""
+        ox, oy, oyaw, ov = None, None, None, None
 
-        # Simple trajectory prediction
-        ox = [x0[0]] * (config.T + 1)
-        oy = [x0[1]] * (config.T + 1)
-        oyaw = [x0[3]] * (config.T + 1)
-        ov = [x0[2]] * (config.T + 1)
+        if oa is None or od is None:
+            oa = [0.0] * config.T
+            od = [0.0] * config.T
+
+        for i in range(config.MAX_ITER):
+            xbar = predict_motion(x0, oa, od, xref, config)
+            poa, pod = oa[:], od[:]
+            oa, od, ox, oy, oyaw, ov = linear_mpc_control(xref, xbar, x0, dref, config)
+
+            if oa is None or od is None:
+                print(f"MPC solver failed at iteration {i}")
+                if i == 0:
+                    oa = [0.0] * config.T
+                    od = [0.0] * config.T
+                    ox = [x0[0]] * (config.T + 1)
+                    oy = [x0[1]] * (config.T + 1)
+                    oyaw = [x0[3]] * (config.T + 1)
+                    ov = [x0[2]] * (config.T + 1)
+                else:
+                    oa = poa
+                    od = pod
+                break
+
+            # Convert to numpy arrays for arithmetic operations
+            oa_array = np.array(oa)
+            od_array = np.array(od)
+            poa_array = np.array(poa)
+            pod_array = np.array(pod)
+
+            du = np.sum(np.abs(oa_array - poa_array)) + np.sum(
+                np.abs(od_array - pod_array)
+            )
+            if du <= config.DU_TH:
+                break
+        else:
+            print("Iterative is max iter")
 
         return oa, od, ox, oy, oyaw, ov
+
+
+if "predict_motion" not in globals():
+
+    def predict_motion(x0, oa, od, xref, config):
+        """Predict motion"""
+        xbar = xref * 0.0
+        for i, _ in enumerate(x0):
+            xbar[i, 0] = x0[i]
+
+        state = State(x=x0[0], y=x0[1], yaw=x0[3], v=x0[2])
+        for ai, di, i in zip(oa, od, range(1, config.T + 1)):
+            state = update_state(state, ai, di, config)
+            xbar[0, i] = state.x
+            xbar[1, i] = state.y
+            xbar[2, i] = state.v
+            xbar[3, i] = state.yaw
+
+        return xbar
+
+
+if "update_state" not in globals():
+
+    def update_state(state, a, delta, config):
+        """Update state"""
+        # input check
+        if delta >= config.MAX_STEER:
+            delta = config.MAX_STEER
+        elif delta <= -config.MAX_STEER:
+            delta = -config.MAX_STEER
+
+        state.x = state.x + state.v * math.cos(state.yaw) * config.DT
+        state.y = state.y + state.v * math.sin(state.yaw) * config.DT
+        state.yaw = state.yaw + state.v / config.WB * math.tan(delta) * config.DT
+        state.v = state.v + a * config.DT
+
+        if state.v > config.MAX_SPEED:
+            state.v = config.MAX_SPEED
+        elif state.v < config.MIN_SPEED:
+            state.v = config.MIN_SPEED
+
+        return state
+
+
+if "get_linear_model_matrix" not in globals():
+
+    def get_linear_model_matrix(v, phi, delta, config):
+        """Get linear model matrix"""
+        A = np.zeros((config.NX, config.NX))
+        A[0, 0] = 1.0
+        A[1, 1] = 1.0
+        A[2, 2] = 1.0
+        A[3, 3] = 1.0
+        A[0, 2] = config.DT * math.cos(phi)
+        A[0, 3] = -config.DT * v * math.sin(phi)
+        A[1, 2] = config.DT * math.sin(phi)
+        A[1, 3] = config.DT * v * math.cos(phi)
+        A[3, 2] = config.DT * math.tan(delta) / config.WB
+
+        B = np.zeros((config.NX, config.NU))
+        B[2, 0] = config.DT
+        B[3, 1] = config.DT * v / (config.WB * math.cos(delta) ** 2)
+
+        C = np.zeros(config.NX)
+        C[0] = config.DT * v * math.sin(phi) * phi
+        C[1] = -config.DT * v * math.cos(phi) * phi
+        C[3] = -config.DT * v * delta / (config.WB * math.cos(delta) ** 2)
+
+        return A, B, C
+
+
+if "linear_mpc_control" not in globals():
+
+    def linear_mpc_control(xref, xbar, x0, dref, config):
+        """Linear MPC control"""
+        try:
+            x = cvxpy.Variable((config.NX, config.T + 1))
+            u = cvxpy.Variable((config.NU, config.T))
+
+            cost = 0.0
+            constraints = []
+
+            for t in range(config.T):
+                cost += cvxpy.quad_form(u[:, t], config.R)
+
+                if t != 0:
+                    cost += cvxpy.quad_form(xref[:, t] - x[:, t], config.Q)
+
+                A, B, C = get_linear_model_matrix(
+                    xbar[2, t], xbar[3, t], dref[0, t], config
+                )
+                constraints += [x[:, t + 1] == A @ x[:, t] + B @ u[:, t] + C]
+
+                if t < (config.T - 1):
+                    cost += cvxpy.quad_form(u[:, t + 1] - u[:, t], config.Rd)
+                    constraints += [
+                        cvxpy.abs(u[1, t + 1] - u[1, t])
+                        <= config.MAX_DSTEER * config.DT
+                    ]
+
+            cost += cvxpy.quad_form(xref[:, config.T] - x[:, config.T], config.Qf)
+
+            constraints += [x[:, 0] == x0]
+            constraints += [x[2, :] <= config.MAX_SPEED]
+            constraints += [x[2, :] >= config.MIN_SPEED]
+            constraints += [cvxpy.abs(u[0, :]) <= config.MAX_ACCEL]
+            constraints += [cvxpy.abs(u[1, :]) <= config.MAX_STEER]
+
+            prob = cvxpy.Problem(cvxpy.Minimize(cost), constraints)
+
+            # Try multiple solvers
+            solvers_to_try = [cvxpy.CLARABEL, cvxpy.OSQP, cvxpy.SCS, cvxpy.ECOS]
+
+            solved = False
+            for solver in solvers_to_try:
+                try:
+                    if solver == cvxpy.CLARABEL:
+                        prob.solve(solver=solver, verbose=False, max_iter=1000)
+                    elif solver == cvxpy.OSQP:
+                        prob.solve(
+                            solver=solver,
+                            verbose=False,
+                            max_iter=1000,
+                            eps_abs=1e-4,
+                            eps_rel=1e-4,
+                        )
+                    elif solver == cvxpy.SCS:
+                        prob.solve(
+                            solver=solver, verbose=False, max_iters=1000, eps=1e-4
+                        )
+                    else:
+                        prob.solve(solver=solver, verbose=False)
+
+                    if (
+                        prob.status == cvxpy.OPTIMAL
+                        or prob.status == cvxpy.OPTIMAL_INACCURATE
+                    ):
+                        solved = True
+                        break
+                except Exception:
+                    continue
+
+            if solved:
+                ox = get_nparray_from_matrix(x.value[0, :])
+                oy = get_nparray_from_matrix(x.value[1, :])
+                ov = get_nparray_from_matrix(x.value[2, :])
+                oyaw = get_nparray_from_matrix(x.value[3, :])
+                oa = get_nparray_from_matrix(u.value[0, :])
+                odelta = get_nparray_from_matrix(u.value[1, :])
+            else:
+                print("Error: Cannot solve mpc with any available solver")
+                oa, odelta, ox, oy, oyaw, ov = None, None, None, None, None, None
+
+        except Exception as e:
+            print(f"MPC optimization error: {e}")
+            oa, odelta, ox, oy, oyaw, ov = None, None, None, None, None, None
+
+        return oa, odelta, ox, oy, oyaw, ov
+
+
+if "get_nparray_from_matrix" not in globals():
+
+    def get_nparray_from_matrix(x):
+        return np.array(x).flatten()
 
 
 # ============================================================================
@@ -366,9 +617,6 @@ class MPCNode(Node):
         self._declare_parameter_if_not_exists(
             "max_steer_deg", math.degrees(MPCConfig.MAX_STEER)
         )
-        # Add new tuning parameters
-        self._declare_parameter_if_not_exists("position_weight", 10.0)
-        self._declare_parameter_if_not_exists("yaw_weight", 5.0)
 
         # Update config from ROS parameters
         MPCConfig.update_from_ros_params(self)
@@ -526,13 +774,16 @@ class MPCNode(Node):
 
         self.get_logger().info("MPC Controller initialized successfully")
         self.get_logger().info(
-            f"IMPROVED Vehicle params: wheelbase={MPCConfig.WB:.3f}m, track={MPCConfig.TRACK_WIDTH:.3f}m"
+            f"Robot params: wheelbase={MPCConfig.WB:.3f}m, track={MPCConfig.TRACK_WIDTH:.3f}m"
         )
         self.get_logger().info(
-            f"IMPROVED Target speed: {self.target_speed:.2f}m/s, Horizon: {MPCConfig.T}, DT: {MPCConfig.DT:.3f}s"
+            f"Steering limits: ±{math.degrees(MPCConfig.MAX_STEER):.1f}° (from URDF)"
         )
         self.get_logger().info(
-            f"IMPROVED Weights - Position: {MPCConfig.Q[0,0]}, Yaw: {MPCConfig.Q[3,3]}, Input: {MPCConfig.R[0,0]}"
+            f"Target speed: {self.target_speed:.2f}m/s, Horizon: {MPCConfig.T}, DT: {MPCConfig.DT:.3f}s"
+        )
+        self.get_logger().info(
+            f"MPC Weights - Position: Q={MPCConfig.Q[0,0]}, Yaw: Q={MPCConfig.Q[3,3]}, Control: R={MPCConfig.R[0,0]}"
         )
 
     def init_mpc(self):
@@ -552,8 +803,27 @@ class MPCNode(Node):
 
         self.odelta, self.oa = None, None
 
+    def check_goal(self, state, goal, tind, nind):
+        """Check if goal is reached"""
+        # check goal
+        dx = state.x - goal[0]
+        dy = state.y - goal[1]
+        d = math.hypot(dx, dy)
+
+        isgoal = d <= MPCConfig.GOAL_DIS
+
+        if abs(tind - nind) >= 5:
+            isgoal = False
+
+        isstop = abs(state.v) <= MPCConfig.STOP_SPEED
+
+        if isgoal and isstop:
+            return True
+
+        return False
+
     def mpc_control(self):
-        """IMPROVED MPC control function with better error handling"""
+        """MPC control function with better error handling"""
         if self.path is None:
             self.get_logger().warn("No path available for MPC control")
             return
@@ -570,6 +840,12 @@ class MPCNode(Node):
             self.current_state = self.get_state(self.robot_odom)
         except Exception as e:
             self.get_logger().error(f"Error reading odometry: {e}")
+            return
+
+        # Check if goal reached
+        if self.check_goal(self.state, self.goal, self.target_ind, len(self.cx)):
+            self.get_logger().info("Goal reached!")
+            self.pub_emergency_stop()
             return
 
         try:
@@ -680,22 +956,22 @@ class MPCNode(Node):
         (_, _, yaw) = euler_from_quaternion(
             [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
         )
-        v = robot_odom.twist.twist.linear.x
+        # v = robot_odom.twist.twist.linear.x
+        if robot_odom.twist.twist.linear.x > 0:
+            v = np.hypot(
+                robot_odom.twist.twist.linear.x, robot_odom.twist.twist.linear.y
+            )
+        else:
+            v = -np.hypot(
+                robot_odom.twist.twist.linear.x, robot_odom.twist.twist.linear.y
+            )
 
         return State(x=x, y=y, yaw=yaw, v=v)
 
     def pub_cmd_vel(self, di, ai):
-        """Publish command velocity with IMPROVED safety limits and smoother control"""
-        # More gradual velocity changes
-        target_linear_x = self.linear_x + ai * MPCConfig.DT
-
-        # Smoother velocity transitions
-        max_vel_change = 0.05  # Limit velocity change per timestep
-        vel_change = target_linear_x - self.linear_x
-        if abs(vel_change) > max_vel_change:
-            vel_change = max_vel_change if vel_change > 0 else -max_vel_change
-
-        self.linear_x = self.linear_x + vel_change
+        """Publish command velocity with safety limits"""
+        # Update linear velocity
+        self.linear_x = self.linear_x + ai * MPCConfig.DT
 
         # Apply safety limits
         self.linear_x = max(
@@ -705,7 +981,7 @@ class MPCNode(Node):
         msg = Twist()
         msg.linear.x = self.linear_x
 
-        # Calculate angular velocity with improved limits
+        # Calculate angular velocity
         angular_z = self.linear_x * math.tan(di) / self.l
         angular_z = max(
             MPCConfig.MIN_ANGULAR_VEL, min(MPCConfig.MAX_ANGULAR_VEL, angular_z)
@@ -734,7 +1010,7 @@ def main(args=None):
             )
             return
 
-        node.get_logger().info("ROBUST MPC controller started successfully")
+        node.get_logger().info("MPC controller started successfully")
         node.get_logger().info(
             f"Configuration: Horizon={MPCConfig.T}, DT={MPCConfig.DT}, Target_Speed={MPCConfig.TARGET_SPEED}"
         )
