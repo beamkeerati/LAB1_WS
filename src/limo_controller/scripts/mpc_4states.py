@@ -48,11 +48,11 @@ except ImportError as e1:
     sys.exit(1)
 
 
-# Import mpc_lib
+# Import mpc_lib with CasADi
 try:
     from mpc_lib import *
 
-    print("✓ Successfully imported mpc_lib")
+    print("✓ Successfully imported mpc_lib with CasADi")
 except ImportError as e:
     print(f"⚠ mpc_lib import failed: {e}")
     sys.exit(1)
