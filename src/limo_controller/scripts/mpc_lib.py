@@ -19,57 +19,11 @@ try:
     from utils.angle import angle_mod
 except ImportError:
     try:
-        sys.path.insert(0, os.path.join(current_dir, "PathPlanning", "CubicSpline"))
-        sys.path.insert(0, os.path.join(current_dir, "utils"))
-        import cubic_spline_planner
-        from angle import angle_mod
-    except ImportError:
-        # Fallback implementations
-        def angle_mod(angle):
-            while angle > math.pi:
-                angle -= 2.0 * math.pi
-            while angle < -math.pi:
-                angle += 2.0 * math.pi
-            return angle
-
-        # Minimal cubic spline fallback
-        class FallbackCubicSplinePlanner:
-            @staticmethod
-            def calc_spline_course(ax, ay, ds=0.1):
-                if len(ax) < 2:
-                    return ax, ay, [0.0] * len(ax), [0.0] * len(ax), [0.0] * len(ax)
-
-                rx, ry, ryaw, rk, s = [], [], [], [], []
-                total_length = 0
-
-                for i in range(len(ax) - 1):
-                    dx = ax[i + 1] - ax[i]
-                    dy = ay[i + 1] - ay[i]
-                    dist = math.sqrt(dx * dx + dy * dy)
-                    yaw = math.atan2(dy, dx)
-
-                    num_points = max(1, int(dist / ds))
-                    for j in range(num_points):
-                        ratio = j / num_points if num_points > 0 else 0
-                        x_interp = ax[i] + ratio * dx
-                        y_interp = ay[i] + ratio * dy
-                        rx.append(x_interp)
-                        ry.append(y_interp)
-                        ryaw.append(yaw)
-                        rk.append(0.0)
-                        s.append(total_length + ratio * dist)
-
-                    total_length += dist
-
-                rx.append(ax[-1])
-                ry.append(ay[-1])
-                ryaw.append(ryaw[-1] if ryaw else 0.0)
-                rk.append(0.0)
-                s.append(total_length)
-
-                return rx, ry, ryaw, rk, s
-
-        cubic_spline_planner = FallbackCubicSplinePlanner()
+        from PathPlanning import cubic_spline_planner
+        from utils import angle_mod
+    except ImportError as e:
+        print(f"Failed to import cubic_spline_planner or angle_mod: {e}")
+        sys.exit(1)
 
 show_animation = False  # Disable for ROS environment
 
@@ -90,7 +44,7 @@ def pi_2_pi(angle):
 
 
 def get_linear_model_matrix(v, phi, delta, config):
-    """Get linear model matrix with configurable parameters"""
+    """Get linear model matrix with improved numerical conditioning"""
     A = np.zeros((config.NX, config.NX))
     A[0, 0] = 1.0
     A[1, 1] = 1.0
@@ -100,37 +54,47 @@ def get_linear_model_matrix(v, phi, delta, config):
     A[0, 3] = -config.DT * v * math.sin(phi)
     A[1, 2] = config.DT * math.sin(phi)
     A[1, 3] = config.DT * v * math.cos(phi)
-    A[3, 2] = config.DT * math.tan(delta) / config.WB
+
+    # Improved numerical conditioning for steering dynamics
+    tan_delta = math.tan(delta)
+    # Clamp to reasonable range to avoid numerical issues
+    tan_delta = max(-10.0, min(10.0, tan_delta))
+    A[3, 2] = config.DT * tan_delta / config.WB
 
     B = np.zeros((config.NX, config.NU))
     B[2, 0] = config.DT
-    B[3, 1] = config.DT * v / (config.WB * math.cos(delta) ** 2)
+
+    # Improved numerical conditioning for steering input
+    cos_delta_sq = math.cos(delta) ** 2
+    cos_delta_sq = max(0.01, cos_delta_sq)  # Avoid division by zero
+    B[3, 1] = config.DT * v / (config.WB * cos_delta_sq)
 
     C = np.zeros(config.NX)
     C[0] = config.DT * v * math.sin(phi) * phi
     C[1] = -config.DT * v * math.cos(phi) * phi
-    C[3] = -config.DT * v * delta / (config.WB * math.cos(delta) ** 2)
+    C[3] = -config.DT * v * delta / (config.WB * cos_delta_sq)
 
     return A, B, C
 
 
 def update_state(state, a, delta, config):
-    """Update state with configurable parameters"""
-    # input check
+    """Update state with improved constraint handling"""
+    # Input constraints with safety margins
     if delta >= config.MAX_STEER:
-        delta = config.MAX_STEER
+        delta = config.MAX_STEER * 0.95  # Small safety margin
     elif delta <= -config.MAX_STEER:
-        delta = -config.MAX_STEER
+        delta = -config.MAX_STEER * 0.95
 
     state.x = state.x + state.v * math.cos(state.yaw) * config.DT
     state.y = state.y + state.v * math.sin(state.yaw) * config.DT
     state.yaw = state.yaw + state.v / config.WB * math.tan(delta) * config.DT
     state.v = state.v + a * config.DT
 
+    # Apply speed limits with safety margins
     if state.v > config.MAX_SPEED:
-        state.v = config.MAX_SPEED
+        state.v = config.MAX_SPEED * 0.95
     elif state.v < config.MIN_SPEED:
-        state.v = config.MIN_SPEED
+        state.v = config.MIN_SPEED * 0.95
 
     return state
 
@@ -140,8 +104,11 @@ def get_nparray_from_matrix(x):
 
 
 def calc_nearest_index(state, cx, cy, cyaw, pind, config):
-    """Calculate nearest index with configurable search parameters"""
+    """Calculate nearest index with improved search"""
     search_range = min(config.N_IND_SEARCH, len(cx) - pind)
+    if search_range <= 0:
+        return pind, 0.0
+
     dx = [state.x - icx for icx in cx[pind : (pind + search_range)]]
     dy = [state.y - icy for icy in cy[pind : (pind + search_range)]]
 
@@ -163,7 +130,7 @@ def calc_nearest_index(state, cx, cy, cyaw, pind, config):
 
 
 def predict_motion(x0, oa, od, xref, config):
-    """Predict motion with configurable parameters"""
+    """Predict motion with improved state validation"""
     xbar = xref * 0.0
     for i, _ in enumerate(x0):
         xbar[i, 0] = x0[i]
@@ -180,7 +147,7 @@ def predict_motion(x0, oa, od, xref, config):
 
 
 def iterative_linear_mpc_control(xref, x0, dref, oa, od, config):
-    """MPC control with updating operational point iteratively"""
+    """MPC control with improved error handling and feasibility"""
     ox, oy, oyaw, ov = None, None, None, None
 
     if oa is None or od is None:
@@ -192,11 +159,10 @@ def iterative_linear_mpc_control(xref, x0, dref, oa, od, config):
         poa, pod = oa[:], od[:]
         oa, od, ox, oy, oyaw, ov = linear_mpc_control(xref, xbar, x0, dref, config)
 
-        # Better error handling for failed optimization
         if oa is None or od is None:
             print(f"MPC solver failed at iteration {i}")
-            # Return previous values or zero control inputs
             if i == 0:
+                # Conservative fallback
                 oa = [0.0] * config.T
                 od = [0.0] * config.T
                 ox = [x0[0]] * (config.T + 1)
@@ -208,7 +174,7 @@ def iterative_linear_mpc_control(xref, x0, dref, oa, od, config):
                 od = pod
             break
 
-        # Convert to numpy arrays if needed for arithmetic operations
+        # Check convergence
         oa_array = np.array(oa)
         od_array = np.array(od)
         poa_array = np.array(poa)
@@ -224,7 +190,7 @@ def iterative_linear_mpc_control(xref, x0, dref, oa, od, config):
 
 
 def linear_mpc_control(xref, xbar, x0, dref, config):
-    """Linear MPC control with configurable parameters"""
+    """Linear MPC control optimized for robot with 10-degree steering limit"""
     try:
         x = cvxpy.Variable((config.NX, config.T + 1))
         u = cvxpy.Variable((config.NU, config.T))
@@ -243,42 +209,46 @@ def linear_mpc_control(xref, xbar, x0, dref, config):
             )
             constraints += [x[:, t + 1] == A @ x[:, t] + B @ u[:, t] + C]
 
+            # Relaxed steering rate constraint
             if t < (config.T - 1):
                 cost += cvxpy.quad_form(u[:, t + 1] - u[:, t], config.Rd)
-                constraints += [
-                    cvxpy.abs(u[1, t + 1] - u[1, t]) <= config.MAX_DSTEER * config.DT
-                ]
+                # More lenient steering rate constraint
+                max_dsteer_dt = config.MAX_DSTEER * config.DT * 2.0  # Double the limit
+                constraints += [cvxpy.abs(u[1, t + 1] - u[1, t]) <= max_dsteer_dt]
 
         cost += cvxpy.quad_form(xref[:, config.T] - x[:, config.T], config.Qf)
 
+        # Initial state constraint
         constraints += [x[:, 0] == x0]
-        constraints += [x[2, :] <= config.MAX_SPEED]
-        constraints += [x[2, :] >= config.MIN_SPEED]
-        constraints += [cvxpy.abs(u[0, :]) <= config.MAX_ACCEL]
-        constraints += [cvxpy.abs(u[1, :]) <= config.MAX_STEER]
+
+        # Relaxed speed constraints with safety margins
+        speed_margin = 0.1
+        constraints += [x[2, :] <= config.MAX_SPEED - speed_margin]
+        constraints += [x[2, :] >= config.MIN_SPEED + speed_margin]
+
+        # Conservative control constraints for 10-degree steering limit
+        accel_margin = 0.05
+        steer_margin = 0.02  # Smaller margin for limited steering range
+        constraints += [cvxpy.abs(u[0, :]) <= config.MAX_ACCEL - accel_margin]
+        constraints += [cvxpy.abs(u[1, :]) <= config.MAX_STEER - steer_margin]
 
         prob = cvxpy.Problem(cvxpy.Minimize(cost), constraints)
 
-        # Try multiple solvers in order of preference
-        solvers_to_try = [cvxpy.CLARABEL, cvxpy.OSQP, cvxpy.SCS, cvxpy.ECOS]
+        # Try multiple solvers with improved settings
+        solvers_to_try = [
+            (cvxpy.CLARABEL, {"verbose": False, "max_iter": 2000, "tol_feas": 1e-6}),
+            (
+                cvxpy.OSQP,
+                {"verbose": False, "max_iter": 2000, "eps_abs": 1e-5, "eps_rel": 1e-5},
+            ),
+            (cvxpy.SCS, {"verbose": False, "max_iters": 2000, "eps": 1e-5}),
+            (cvxpy.ECOS, {"verbose": False, "max_iters": 2000}),
+        ]
 
         solved = False
-        for solver in solvers_to_try:
+        for solver, solver_opts in solvers_to_try:
             try:
-                if solver == cvxpy.CLARABEL:
-                    prob.solve(solver=solver, verbose=False, max_iter=1000)
-                elif solver == cvxpy.OSQP:
-                    prob.solve(
-                        solver=solver,
-                        verbose=False,
-                        max_iter=1000,
-                        eps_abs=1e-4,
-                        eps_rel=1e-4,
-                    )
-                elif solver == cvxpy.SCS:
-                    prob.solve(solver=solver, verbose=False, max_iters=1000, eps=1e-4)
-                else:
-                    prob.solve(solver=solver, verbose=False)
+                prob.solve(solver=solver, **solver_opts)
 
                 if (
                     prob.status == cvxpy.OPTIMAL
@@ -311,7 +281,7 @@ def linear_mpc_control(xref, xbar, x0, dref, config):
 
 
 def calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, pind, config):
-    """Calculate reference trajectory with configurable parameters"""
+    """Calculate reference trajectory with improved handling"""
     xref = np.zeros((config.NX, config.T + 1))
     dref = np.zeros((1, config.T + 1))
     ncourse = len(cx)
@@ -321,11 +291,14 @@ def calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, pind, config):
     if pind >= ind:
         ind = pind
 
+    # Ensure index is within bounds
+    ind = max(0, min(ind, ncourse - 1))
+
     xref[0, 0] = cx[ind]
     xref[1, 0] = cy[ind]
     xref[2, 0] = sp[ind]
     xref[3, 0] = cyaw[ind]
-    dref[0, 0] = 0.0  # steer operational point should be 0
+    dref[0, 0] = 0.0
 
     travel = 0.0
 
@@ -350,8 +323,7 @@ def calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, pind, config):
 
 
 def check_goal(state, goal, tind, nind, config):
-    """Check if goal is reached with configurable parameters"""
-    # check goal
+    """Check if goal is reached"""
     dx = state.x - goal[0]
     dy = state.y - goal[1]
     d = math.hypot(dx, dy)
@@ -370,11 +342,10 @@ def check_goal(state, goal, tind, nind, config):
 
 
 def calc_speed_profile(cx, cy, cyaw, target_speed, config):
-    """Calculate speed profile with configurable parameters"""
+    """Calculate speed profile with direction handling"""
     speed_profile = [target_speed] * len(cx)
-    direction = 1.0  # forward
+    direction = 1.0
 
-    # Set stop point
     for i in range(len(cx) - 1):
         dx = cx[i + 1] - cx[i]
         dy = cy[i + 1] - cy[i]
@@ -399,7 +370,7 @@ def calc_speed_profile(cx, cy, cyaw, target_speed, config):
 
 
 def smooth_yaw(yaw, config):
-    """Smooth yaw angles with configurable parameters"""
+    """Smooth yaw angles to prevent discontinuities"""
     for i in range(len(yaw) - 1):
         dyaw = yaw[i + 1] - yaw[i]
 
@@ -427,7 +398,7 @@ def calculate_path_distance(cx, cy):
 
     # Average distance between points
     dl = total_distance / (len(cx) - 1)
-    return dl
+    return max(dl, 0.1)  # Ensure minimum distance
 
 
 def get_straight_course(dl):
