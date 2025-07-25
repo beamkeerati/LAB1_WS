@@ -168,10 +168,10 @@ def generate_launch_description():
             'robot_name',
             default_value='limo',
             description='Name of the robot in simulation'),
-        # DeclareLaunchArgument(
-        #     'world',
-        #     default_value=robot_world,
-        #     description='Gazebo world file'),
+        DeclareLaunchArgument(
+            'world',
+            default_value=robot_world,
+            description='Gazebo world file'),
         DeclareLaunchArgument(
             'spawn_x',
             default_value=spawn_x_val,
