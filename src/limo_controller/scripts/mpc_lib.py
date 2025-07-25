@@ -4,7 +4,7 @@ import math
 import numpy as np
 import sys
 import os
-import cvxpy
+import casadi as ca
 
 # ROBUST IMPORT HANDLING
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -99,23 +99,23 @@ def update_state(state, a, delta, config):
     return state
 
 
-def get_nparray_from_matrix(x):
-    return np.array(x).flatten()
-
-
 def calc_nearest_index(state, cx, cy, cyaw, pind, config):
-    """Calculate nearest index with improved search"""
+    """Calculate nearest index with improved search and yaw consideration"""
     search_range = min(config.N_IND_SEARCH, len(cx) - pind)
     if search_range <= 0:
         return pind, 0.0
 
-    dx = [state.x - icx for icx in cx[pind : (pind + search_range)]]
-    dy = [state.y - icy for icy in cy[pind : (pind + search_range)]]
+    # Expand search range for better path following
+    search_start = max(0, pind - 5)  # Look backward too
+    search_end = min(len(cx), pind + search_range + 10)  # Look further ahead
+
+    dx = [state.x - icx for icx in cx[search_start:search_end]]
+    dy = [state.y - icy for icy in cy[search_start:search_end]]
 
     d = [idx**2 + idy**2 for (idx, idy) in zip(dx, dy)]
 
     mind = min(d)
-    ind = d.index(mind) + pind
+    ind = d.index(mind) + search_start
 
     mind = math.sqrt(mind)
 
@@ -147,7 +147,7 @@ def predict_motion(x0, oa, od, xref, config):
 
 
 def iterative_linear_mpc_control(xref, x0, dref, oa, od, config):
-    """MPC control with improved error handling and feasibility"""
+    """MPC control with improved error handling and feasibility using CasADi"""
     ox, oy, oyaw, ov = None, None, None, None
 
     if oa is None or od is None:
@@ -157,10 +157,11 @@ def iterative_linear_mpc_control(xref, x0, dref, oa, od, config):
     for i in range(config.MAX_ITER):
         xbar = predict_motion(x0, oa, od, xref, config)
         poa, pod = oa[:], od[:]
-        oa, od, ox, oy, oyaw, ov = linear_mpc_control(xref, xbar, x0, dref, config)
+        oa, od, ox, oy, oyaw, ov = linear_mpc_control_casadi(
+            xref, xbar, x0, dref, config
+        )
 
         if oa is None or od is None:
-            print(f"MPC solver failed at iteration {i}")
             if i == 0:
                 # Conservative fallback
                 oa = [0.0] * config.T
@@ -183,140 +184,233 @@ def iterative_linear_mpc_control(xref, x0, dref, oa, od, config):
         du = np.sum(np.abs(oa_array - poa_array)) + np.sum(np.abs(od_array - pod_array))
         if du <= config.DU_TH:
             break
-    else:
-        print("Iterative is max iter")
 
     return oa, od, ox, oy, oyaw, ov
 
 
-def linear_mpc_control(xref, xbar, x0, dref, config):
-    """Linear MPC control optimized for robot with 10-degree steering limit"""
+def linear_mpc_control_casadi(xref, xbar, x0, dref, config):
+    """Linear MPC control using CasADi with IPOPT solver"""
     try:
-        x = cvxpy.Variable((config.NX, config.T + 1))
-        u = cvxpy.Variable((config.NU, config.T))
+        # Decision variables
+        x = ca.MX.sym("x", config.NX, config.T + 1)  # States over horizon
+        u = ca.MX.sym("u", config.NU, config.T)  # Controls over horizon
 
-        cost = 0.0
+        # Parameters (reference trajectory)
+        x_ref = ca.MX.sym("x_ref", config.NX, config.T + 1)
+        x0_param = ca.MX.sym("x0", config.NX)
+        xbar_param = ca.MX.sym("xbar", config.NX, config.T + 1)
+        dref_param = ca.MX.sym("dref", 1, config.T + 1)
+
+        # Cost function
+        cost = 0
         constraints = []
-
-        for t in range(config.T):
-            cost += cvxpy.quad_form(u[:, t], config.R)
-
-            if t != 0:
-                cost += cvxpy.quad_form(xref[:, t] - x[:, t], config.Q)
-
-            A, B, C = get_linear_model_matrix(
-                xbar[2, t], xbar[3, t], dref[0, t], config
-            )
-            constraints += [x[:, t + 1] == A @ x[:, t] + B @ u[:, t] + C]
-
-            # Relaxed steering rate constraint
-            if t < (config.T - 1):
-                cost += cvxpy.quad_form(u[:, t + 1] - u[:, t], config.Rd)
-                # More lenient steering rate constraint
-                max_dsteer_dt = config.MAX_DSTEER * config.DT * 2.0  # Double the limit
-                constraints += [cvxpy.abs(u[1, t + 1] - u[1, t]) <= max_dsteer_dt]
-
-        cost += cvxpy.quad_form(xref[:, config.T] - x[:, config.T], config.Qf)
+        lbg = []  # Lower bounds for constraints
+        ubg = []  # Upper bounds for constraints
 
         # Initial state constraint
-        constraints += [x[:, 0] == x0]
+        constraints.append(x[:, 0] - x0_param)
+        lbg.extend([0.0] * config.NX)
+        ubg.extend([0.0] * config.NX)
 
-        # Relaxed speed constraints with safety margins
-        speed_margin = 0.1
-        constraints += [x[2, :] <= config.MAX_SPEED - speed_margin]
-        constraints += [x[2, :] >= config.MIN_SPEED + speed_margin]
+        # Build cost and dynamics constraints
+        for t in range(config.T):
+            # Control cost
+            cost += ca.mtimes([u[:, t].T, config.R, u[:, t]])
 
-        # Conservative control constraints for 10-degree steering limit
-        accel_margin = 0.05
-        steer_margin = 0.02  # Smaller margin for limited steering range
-        constraints += [cvxpy.abs(u[0, :]) <= config.MAX_ACCEL - accel_margin]
-        constraints += [cvxpy.abs(u[1, :]) <= config.MAX_STEER - steer_margin]
+            # State cost (except initial state)
+            if t > 0:
+                state_error = x_ref[:, t] - x[:, t]
+                cost += ca.mtimes([state_error.T, config.Q, state_error])
 
-        prob = cvxpy.Problem(cvxpy.Minimize(cost), constraints)
+            # Get linearized dynamics matrices
+            A, B, C = get_linear_model_matrix(
+                float(xbar[2, t]), float(xbar[3, t]), float(dref[0, t]), config
+            )
 
-        # Try multiple solvers with improved settings
-        solvers_to_try = [
-            (cvxpy.CLARABEL, {"verbose": False, "max_iter": 2000, "tol_feas": 1e-6}),
-            (
-                cvxpy.OSQP,
-                {"verbose": False, "max_iter": 2000, "eps_abs": 1e-5, "eps_rel": 1e-5},
-            ),
-            (cvxpy.SCS, {"verbose": False, "max_iters": 2000, "eps": 1e-5}),
-            (cvxpy.ECOS, {"verbose": False, "max_iters": 2000}),
-        ]
+            # Convert to CasADi format
+            A_ca = ca.DM(A)
+            B_ca = ca.DM(B)
+            C_ca = ca.DM(C)
 
-        solved = False
-        for solver, solver_opts in solvers_to_try:
-            try:
-                prob.solve(solver=solver, **solver_opts)
+            # Dynamics constraint: x_{t+1} = A*x_t + B*u_t + C
+            dynamics = x[:, t + 1] - (
+                ca.mtimes(A_ca, x[:, t]) + ca.mtimes(B_ca, u[:, t]) + C_ca
+            )
+            constraints.append(dynamics)
+            lbg.extend([0.0] * config.NX)
+            ubg.extend([0.0] * config.NX)
 
-                if (
-                    prob.status == cvxpy.OPTIMAL
-                    or prob.status == cvxpy.OPTIMAL_INACCURATE
-                ):
-                    solved = True
-                    break
-                else:
-                    print(f"Solver {solver} failed with status: {prob.status}")
-            except Exception as e:
-                print(f"Solver {solver} encountered error: {e}")
-                continue
+            # Control rate constraints
+            if t < (config.T - 1):
+                rate_cost = ca.mtimes(
+                    [(u[:, t + 1] - u[:, t]).T, config.Rd, (u[:, t + 1] - u[:, t])]
+                )
+                cost += rate_cost
 
-        if solved:
-            ox = get_nparray_from_matrix(x.value[0, :])
-            oy = get_nparray_from_matrix(x.value[1, :])
-            ov = get_nparray_from_matrix(x.value[2, :])
-            oyaw = get_nparray_from_matrix(x.value[3, :])
-            oa = get_nparray_from_matrix(u.value[0, :])
-            odelta = get_nparray_from_matrix(u.value[1, :])
+                # Steering rate constraint
+                max_dsteer_dt = config.MAX_DSTEER * config.DT * 2.0
+                constraints.append(u[1, t + 1] - u[1, t])
+                lbg.append(-max_dsteer_dt)
+                ubg.append(max_dsteer_dt)
+
+        # Terminal cost
+        terminal_error = x_ref[:, config.T] - x[:, config.T]
+        cost += ca.mtimes([terminal_error.T, config.Qf, terminal_error])
+
+        # State and control bounds
+        lbx = []  # Lower bounds for decision variables
+        ubx = []  # Upper bounds for decision variables
+
+        # State bounds: [x, y, v, yaw]
+        for t in range(config.T + 1):
+            lbx.extend(
+                [-ca.inf, -ca.inf, config.MIN_SPEED + 0.1, -ca.inf]
+            )  # x, y, v, yaw
+            ubx.extend([ca.inf, ca.inf, config.MAX_SPEED - 0.1, ca.inf])
+
+        # Control bounds: [acceleration, steering]
+        for t in range(config.T):
+            lbx.extend([-config.MAX_ACCEL + 0.05, -config.MAX_STEER + 0.02])
+            ubx.extend([config.MAX_ACCEL - 0.05, config.MAX_STEER - 0.02])
+
+        # Create optimization variables vector
+        opt_vars = ca.vertcat(ca.reshape(x, -1, 1), ca.reshape(u, -1, 1))
+
+        # Create parameter vector
+        params = ca.vertcat(
+            ca.reshape(x_ref, -1, 1),
+            x0_param,
+            ca.reshape(xbar_param, -1, 1),
+            ca.reshape(dref_param, -1, 1),
+        )
+
+        # Create the NLP
+        nlp = {"x": opt_vars, "f": cost, "g": ca.vertcat(*constraints), "p": params}
+
+        # Solver options
+        opts = {
+            "ipopt.print_level": 0,
+            "ipopt.max_iter": 100,
+            "ipopt.tol": 1e-4,
+            "ipopt.acceptable_tol": 1e-3,
+            "print_time": False,
+            "verbose": False,
+        }
+
+        # Create solver
+        solver = ca.nlpsol("solver", "ipopt", nlp, opts)
+
+        # Prepare parameter values
+        x_ref_flat = xref.flatten(order="F")
+        xbar_flat = xbar.flatten(order="F")
+        dref_flat = dref.flatten(order="F")
+        param_values = np.concatenate([x_ref_flat, x0, xbar_flat, dref_flat])
+
+        # Initial guess (warm start with previous solution if available)
+        x0_guess = np.tile(x0, config.T + 1)  # Repeat initial state
+        u0_guess = np.zeros(config.NU * config.T)  # Zero controls
+        init_guess = np.concatenate([x0_guess, u0_guess])
+
+        # Solve
+        solution = solver(
+            x0=init_guess, lbx=lbx, ubx=ubx, lbg=lbg, ubg=ubg, p=param_values
+        )
+
+        # Check if solver succeeded
+        if solver.stats()["success"]:
+            # Extract solution
+            opt_solution = solution["x"].full().flatten()
+
+            # Extract states and controls
+            x_opt = opt_solution[: config.NX * (config.T + 1)].reshape(
+                (config.NX, config.T + 1), order="F"
+            )
+            u_opt = opt_solution[config.NX * (config.T + 1) :].reshape(
+                (config.NU, config.T), order="F"
+            )
+
+            ox = x_opt[0, :].tolist()
+            oy = x_opt[1, :].tolist()
+            ov = x_opt[2, :].tolist()
+            oyaw = x_opt[3, :].tolist()
+            oa = u_opt[0, :].tolist()
+            odelta = u_opt[1, :].tolist()
+
         else:
-            print("Error: Cannot solve mpc with any available solver")
             oa, odelta, ox, oy, oyaw, ov = None, None, None, None, None, None
 
     except Exception as e:
-        print(f"MPC optimization error: {e}")
         oa, odelta, ox, oy, oyaw, ov = None, None, None, None, None, None
 
     return oa, odelta, ox, oy, oyaw, ov
 
 
 def calc_ref_trajectory(state, cx, cy, cyaw, ck, sp, dl, pind, config):
-    """Calculate reference trajectory with improved handling"""
+    """Calculate reference trajectory with improved handling and yaw wrapping"""
     xref = np.zeros((config.NX, config.T + 1))
     dref = np.zeros((1, config.T + 1))
     ncourse = len(cx)
 
     ind, _ = calc_nearest_index(state, cx, cy, cyaw, pind, config)
 
+    # Ensure we're progressing forward along the path
     if pind >= ind:
         ind = pind
 
     # Ensure index is within bounds
     ind = max(0, min(ind, ncourse - 1))
 
+    # Handle yaw wrapping for reference
+    ref_yaw = cyaw[ind]
+    # Wrap reference yaw to be close to current robot yaw
+    while ref_yaw - state.yaw > math.pi:
+        ref_yaw -= 2 * math.pi
+    while ref_yaw - state.yaw < -math.pi:
+        ref_yaw += 2 * math.pi
+
     xref[0, 0] = cx[ind]
     xref[1, 0] = cy[ind]
-    xref[2, 0] = sp[ind]
-    xref[3, 0] = cyaw[ind]
+    # IMPORTANT: Clamp reference speed to respect constraints
+    ref_speed = max(config.MIN_SPEED + 0.1, min(config.MAX_SPEED - 0.1, sp[ind]))
+    xref[2, 0] = ref_speed
+    xref[3, 0] = ref_yaw
     dref[0, 0] = 0.0
 
     travel = 0.0
+    prev_yaw = ref_yaw
 
-    for i in range(config.T + 1):
+    for i in range(1, config.T + 1):
         travel += abs(state.v) * config.DT
         dind = int(round(travel / dl))
 
         if (ind + dind) < ncourse:
             xref[0, i] = cx[ind + dind]
             xref[1, i] = cy[ind + dind]
-            xref[2, i] = sp[ind + dind]
-            xref[3, i] = cyaw[ind + dind]
+            # IMPORTANT: Clamp reference speed to respect constraints
+            ref_speed = max(
+                config.MIN_SPEED + 0.1, min(config.MAX_SPEED - 0.1, sp[ind + dind])
+            )
+            xref[2, i] = ref_speed
+
+            # Handle yaw continuity in reference trajectory
+            next_yaw = cyaw[ind + dind]
+            while next_yaw - prev_yaw > math.pi:
+                next_yaw -= 2 * math.pi
+            while next_yaw - prev_yaw < -math.pi:
+                next_yaw += 2 * math.pi
+            xref[3, i] = next_yaw
+            prev_yaw = next_yaw
+
             dref[0, i] = 0.0
         else:
             xref[0, i] = cx[ncourse - 1]
             xref[1, i] = cy[ncourse - 1]
-            xref[2, i] = sp[ncourse - 1]
-            xref[3, i] = cyaw[ncourse - 1]
+            # IMPORTANT: Clamp reference speed to respect constraints
+            ref_speed = max(
+                config.MIN_SPEED + 0.1, min(config.MAX_SPEED - 0.1, sp[ncourse - 1])
+            )
+            xref[2, i] = ref_speed
+            xref[3, i] = prev_yaw  # Keep consistent yaw at end
             dref[0, i] = 0.0
 
     return xref, ind, dref
@@ -342,7 +436,7 @@ def check_goal(state, goal, tind, nind, config):
 
 
 def calc_speed_profile(cx, cy, cyaw, target_speed, config):
-    """Calculate speed profile with direction handling"""
+    """Calculate speed profile with direction handling and constraint compliance"""
     speed_profile = [target_speed] * len(cx)
     direction = 1.0
 
@@ -366,23 +460,31 @@ def calc_speed_profile(cx, cy, cyaw, target_speed, config):
 
     speed_profile[-1] = 0.0
 
+    # IMPORTANT: Clamp speeds to respect constraints
+    for i in range(len(speed_profile)):
+        speed_profile[i] = max(
+            config.MIN_SPEED, min(config.MAX_SPEED, speed_profile[i])
+        )
+
     return speed_profile
 
 
 def smooth_yaw(yaw, config):
-    """Smooth yaw angles to prevent discontinuities"""
-    for i in range(len(yaw) - 1):
-        dyaw = yaw[i + 1] - yaw[i]
+    """Smooth yaw angles to prevent discontinuities with improved handling"""
+    smoothed_yaw = yaw.copy()
 
-        while dyaw >= math.pi / 2.0:
-            yaw[i + 1] -= math.pi * 2.0
-            dyaw = yaw[i + 1] - yaw[i]
+    for i in range(len(smoothed_yaw) - 1):
+        dyaw = smoothed_yaw[i + 1] - smoothed_yaw[i]
 
-        while dyaw <= -math.pi / 2.0:
-            yaw[i + 1] += math.pi * 2.0
-            dyaw = yaw[i + 1] - yaw[i]
+        while dyaw >= math.pi:
+            smoothed_yaw[i + 1] -= math.pi * 2.0
+            dyaw = smoothed_yaw[i + 1] - smoothed_yaw[i]
 
-    return yaw
+        while dyaw <= -math.pi:
+            smoothed_yaw[i + 1] += math.pi * 2.0
+            dyaw = smoothed_yaw[i + 1] - smoothed_yaw[i]
+
+    return smoothed_yaw
 
 
 def calculate_path_distance(cx, cy):

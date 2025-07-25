@@ -48,11 +48,11 @@ except ImportError as e1:
     sys.exit(1)
 
 
-# Import mpc_lib
+# Import mpc_lib with CasADi
 try:
     from mpc_lib import *
 
-    print("✓ Successfully imported mpc_lib")
+    print("✓ Successfully imported mpc_lib with CasADi")
 except ImportError as e:
     print(f"⚠ mpc_lib import failed: {e}")
     sys.exit(1)
@@ -69,13 +69,13 @@ class MPCConfig:
     NU = 2  # a = [accel, steer]
     T = 10  # Increased horizon for better lookahead
 
-    # MPC Cost Matrices - Rebalanced for tighter steering constraints
-    R = np.diag([0.01, 0.5])  # Lower accel cost, higher steering cost
-    Rd = np.diag([0.01, 1.0])  # Lower accel rate, higher steering rate penalty
+    # MPC Cost Matrices - More aggressive tracking weights
+    R = np.diag([0.1, 1.0])  # Higher control costs to smooth commands
+    Rd = np.diag([0.1, 2.0])  # Higher rate penalties for smoothness
     Q = np.diag(
-        [1.0, 1.0, 0.3, 0.8]
-    )  # Moderate pos tracking, lower speed weight, higher yaw weight
-    Qf = Q  # Terminal cost
+        [10.0, 10.0, 1.0, 15.0]  # MUCH higher position and yaw tracking weights
+    )
+    Qf = Q * 2.0  # Even higher terminal cost for better convergence
 
     # Goal and Stopping Parameters
     GOAL_DIS = 1.5
@@ -86,9 +86,9 @@ class MPCConfig:
     MAX_ITER = 3
     DU_TH = 0.1
 
-    # Speed Parameters - More conservative
-    TARGET_SPEED = 1.0  # Reduced from 1.5 for stability
-    N_IND_SEARCH = 20
+    # Speed Parameters - More conservative for better tracking
+    TARGET_SPEED = 0.5  # Reduced for better path following
+    N_IND_SEARCH = 30  # Increased search range
 
     # Time Step
     DT = 0.1  # Reduced for better stability
@@ -107,16 +107,16 @@ class MPCConfig:
     WHEEL_BASE = 0.2
     TRACK_WIDTH = 0.14
 
-    # Control Constraints - Matched to robot description from kinematics
+    # Control Constraints - FIXED to allow reverse speeds that match path requirements
     MAX_STEER = np.deg2rad(10.0)  # Matches inverse_kinematics.py constraint
     MAX_DSTEER = np.deg2rad(30.0)  # Reasonable steering rate limit
     MAX_SPEED = 1.5  # Conservative speed limit for small robot
-    MIN_SPEED = -0.5  # Limited reverse speed
+    MIN_SPEED = -1.5  # FIXED: Allow full reverse speed to match path requirements
     MAX_ACCEL = 1.5  # Conservative acceleration limit
 
     # For cmd_vel output limits - matched to robot capabilities
     MAX_LINEAR_VEL = 1.0  # Conservative for small robot
-    MIN_LINEAR_VEL = -0.5  # Limited reverse
+    MIN_LINEAR_VEL = -1.0  # FIXED: Allow reverse to match path
     MAX_ANGULAR_VEL = 0.8  # Reasonable turning rate
     MIN_ANGULAR_VEL = -0.8
 
@@ -257,6 +257,11 @@ class MPCNode(Node):
         # Variables for reference tracking
         self.current_reference = None
 
+        # Control loop counter for the specific debug message you want to keep
+        self.control_loop_count = 0
+        self.stuck_counter = 0  # Track if robot gets stuck
+        self.last_target_ind = 0
+
         # Initialize MPC
         if self.path is not None:
             self.init_path()
@@ -269,9 +274,7 @@ class MPCNode(Node):
         try:
             self.declare_parameter(name, default_value)
         except ParameterAlreadyDeclaredException:
-            self.get_logger().debug(
-                f"Parameter '{name}' already declared, using existing value"
-            )
+            pass
 
     def read_path(self):
         """Load path from YAML file"""
@@ -345,18 +348,6 @@ class MPCNode(Node):
         self.get_logger().info(
             "MPC Controller initialized with robot-matched parameters"
         )
-        self.get_logger().info(
-            f"Robot params: wheelbase={MPCConfig.WB:.3f}m, track={MPCConfig.TRACK_WIDTH:.3f}m"
-        )
-        self.get_logger().info(
-            f"Steering limits: ±{math.degrees(MPCConfig.MAX_STEER):.1f}° (matched to inverse_kinematics.py)"
-        )
-        self.get_logger().info(
-            f"Target speed: {self.target_speed:.2f}m/s, Horizon: {MPCConfig.T}, DT: {MPCConfig.DT:.3f}s"
-        )
-        self.get_logger().info(
-            f"MPC Weights - Position: Q={MPCConfig.Q[0,0]}, Yaw: Q={MPCConfig.Q[3,3]}, Control: R={MPCConfig.R[0,0]}"
-        )
 
     def init_mpc(self):
         """Initialize MPC state"""
@@ -373,7 +364,6 @@ class MPCNode(Node):
         self.target_ind, _ = calc_nearest_index(
             self.state, self.cx, self.cy, self.cyaw, 0, MPCConfig
         )
-
         self.odelta, self.oa = None, None
 
     def check_goal(self, state, goal, tind, nind):
@@ -401,7 +391,6 @@ class MPCNode(Node):
             return
 
         if not hasattr(self.robot_odom, "pose") or self.robot_odom.pose is None:
-            self.get_logger().debug("Robot odometry not available yet")
             return
 
         if self.emergency_stop:
@@ -410,9 +399,18 @@ class MPCNode(Node):
 
         try:
             self.current_state = self.get_state(self.robot_odom)
+            # IMPORTANT: Update the MPC state with current robot state
+            self.state = self.current_state
         except Exception as e:
             self.get_logger().error(f"Error reading odometry: {e}")
             return
+
+        # Log current state every 10 iterations (ONLY debug message you wanted to keep)
+        self.control_loop_count += 1
+        if self.control_loop_count % 10 == 1:
+            self.get_logger().info(
+                f"Loop {self.control_loop_count}: Robot state: x={self.current_state.x:.3f}, y={self.current_state.y:.3f}, yaw={self.current_state.yaw:.3f}, v={self.current_state.v:.2f}"
+            )
 
         # Check if goal reached
         if self.check_goal(self.state, self.goal, self.target_ind, len(self.cx)):
@@ -432,6 +430,16 @@ class MPCNode(Node):
                 self.target_ind,
                 MPCConfig,
             )
+
+            # Check if robot is stuck at same target index
+            if self.target_ind == self.last_target_ind:
+                self.stuck_counter += 1
+                if self.stuck_counter > 20:  # Stuck for 2 seconds
+                    self.target_ind = min(self.target_ind + 2, len(self.cx) - 1)
+                    self.stuck_counter = 0
+            else:
+                self.stuck_counter = 0
+                self.last_target_ind = self.target_ind
 
             # Store current reference for tracking analysis
             self.current_reference = {
@@ -477,7 +485,6 @@ class MPCNode(Node):
                 di, ai = self.odelta[0], self.oa[0]
 
             self.pub_cmd_vel(di, ai)
-            self.state = self.get_state(self.robot_odom)
 
         except Exception as e:
             self.get_logger().error(f"Error in MPC control: {e}")
@@ -511,7 +518,6 @@ class MPCNode(Node):
             or self.robot_odom.pose is None
             or self.robot_odom.pose.pose is None
         ):
-            self.get_logger().debug("Waiting for odometry data...")
             return
 
         self.publish_path()
@@ -584,9 +590,6 @@ def main(args=None):
             return
 
         node.get_logger().info("MPC controller started successfully")
-        node.get_logger().info(
-            f"Configuration: Horizon={MPCConfig.T}, DT={MPCConfig.DT}, Target_Speed={MPCConfig.TARGET_SPEED}"
-        )
         rclpy.spin(node)
 
     except KeyboardInterrupt:
