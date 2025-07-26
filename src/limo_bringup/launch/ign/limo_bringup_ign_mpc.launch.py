@@ -4,13 +4,21 @@ from launch.actions import (
     DeclareLaunchArgument,
     ExecuteProcess,
     IncludeLaunchDescription,
+    TimerAction,
 )
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_prefix, get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import RegisterEventHandler
+from launch.actions import AppendEnvironmentVariable
+from launch.event_handlers import OnProcessExit
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
+
 
 
 def generate_launch_description():
@@ -38,7 +46,7 @@ def generate_launch_description():
     # IMPROVED MPC controller with better tracking parameters
     mpc = Node(
         package="limo_controller",
-        executable="mpc_4states.py",  # Use the improved version
+        executable="mpc.py",  # Use the improved version
         name="mpc_node",
         output="screen",
         # parameters=[
@@ -106,7 +114,6 @@ def generate_launch_description():
     # Add all nodes
     ld.add_action(limo_description)
     ld.add_action(odom)
-    # ld.add_action(mpc)  # Now using improved MPC
     ld.add_action(inv_kin)
 
     # Conditionally add tracking measurement
@@ -124,5 +131,14 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration("enable_tracking_measurement")),
         )
     )
+
+    # FIXED: Use TimerAction to delay MPC launch instead of OnProcessExit
+    # This gives the description launch time to initialize before starting MPC
+    mpc_delayed = TimerAction(
+        period=10.0,  # Wait 3 seconds after launch starts
+        actions=[mpc]
+    )
+
+    ld.add_action(mpc_delayed)
 
     return ld

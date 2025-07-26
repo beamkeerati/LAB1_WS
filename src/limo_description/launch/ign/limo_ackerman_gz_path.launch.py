@@ -34,7 +34,7 @@ def generate_launch_description():
     # Pose where we want to spawn the robot
     spawn_x_val = '9.073496746393584'
     spawn_y_val = '0'
-    spawn_z_val = '0.'
+    spawn_z_val = '0.5'
     spawn_yaw_val = '1.57'
     
     rviz_config_file = PathJoinSubstitution(

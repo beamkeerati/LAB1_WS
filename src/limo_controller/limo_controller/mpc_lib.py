@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 
 import math
 import numpy as np
@@ -15,8 +15,8 @@ cubic_spline_planner = None
 angle_mod = None
 
 try:
-    from PathPlanning.CubicSpline import cubic_spline_planner
-    from utils.angle import angle_mod
+    from limo_controller.PathPlanning.CubicSpline import cubic_spline_planner
+    from limo_controller.utils.angle import angle_mod
 except ImportError:
     try:
         from PathPlanning import cubic_spline_planner
