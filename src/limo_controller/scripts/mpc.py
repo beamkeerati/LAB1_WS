@@ -531,14 +531,15 @@ class MPCNode(Node):
             [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
         )
 
-        if robot_odom.twist.twist.linear.x > 0:
-            v = np.hypot(
-                robot_odom.twist.twist.linear.x, robot_odom.twist.twist.linear.y
-            )
-        else:
-            v = -np.hypot(
-                robot_odom.twist.twist.linear.x, robot_odom.twist.twist.linear.y
-            )
+        v = robot_odom.twist.twist.linear.x
+        # if robot_odom.twist.twist.linear.x > 0:
+        #     v = np.hypot(
+        #         robot_odom.twist.twist.linear.x, robot_odom.twist.twist.linear.y
+        #     )
+        # else:
+        #     v = -np.hypot(
+        #         robot_odom.twist.twist.linear.x, robot_odom.twist.twist.linear.y
+        #     )
 
         return State(x=x, y=y, yaw=yaw, v=v)
 
