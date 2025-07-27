@@ -52,7 +52,7 @@ def generate_launch_description():
     
     save_dir_arg = DeclareLaunchArgument(
         'save_directory',
-        default_value='~/mpc_evaluation',
+        default_value='mpc_evaluation',
         description='Directory to save results'
     )
     

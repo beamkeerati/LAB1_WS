@@ -25,6 +25,7 @@ import os
 import sys
 import yaml
 import cvxpy
+import json  # FIX: Add missing json import
 from ament_index_python.packages import get_package_share_directory
 
 # Add current directory and parent directories to Python path
@@ -50,11 +51,7 @@ from limo_controller.mpc_lib import (
     calc_nearest_index,
     calc_ref_trajectory,
     iterative_linear_mpc_control,
-    get_straight_course,
-    get_straight_course2, 
-    get_straight_course3,
-    get_forward_course,
-    get_switch_back_course
+    get_switch_back_course  # Only import switch_back path generator
 )
 
 
@@ -216,7 +213,7 @@ class MPCNode(Node):
         self._declare_parameter_if_not_exists("yaw_weight", 15.0)
         self._declare_parameter_if_not_exists("control_weight", 0.1)
         
-        # NEW: Path selection parameters
+        # UPDATED: Path selection parameters - only YAML and switch_back
         self._declare_parameter_if_not_exists("path_type", "yaml")  # Default to YAML
         self._declare_parameter_if_not_exists("use_yaml_path", True)  # Backward compatibility
         self._declare_parameter_if_not_exists("yaml_path_file", "path.yaml")  # Custom YAML file
@@ -391,22 +388,15 @@ class MPCNode(Node):
             return False
 
     def generate_path_from_type(self):
-        """Generate path based on path_type parameter (new method)"""
+        """Generate path based on path_type parameter (new method) - only switch_back supported"""
         try:
             # Calculate path distance for interpolation
             dl = 0.1  # Default path resolution
             
-            path_generators = {
-                "straight": get_straight_course,
-                "straight2": get_straight_course2,
-                "straight3": get_straight_course3,
-                "forward": get_forward_course,
-                "switch_back": get_switch_back_course
-            }
-            
-            if self.path_type in path_generators:
-                self.cx, self.cy, self.cyaw, self.ck = path_generators[self.path_type](dl)
-                self.get_logger().info(f"Generated {self.path_type} path with {len(self.cx)} points")
+            # UPDATED: Only support switch_back path generator
+            if self.path_type == "switch_back":
+                self.cx, self.cy, self.cyaw, self.ck = get_switch_back_course(dl)
+                self.get_logger().info(f"Generated switch_back path with {len(self.cx)} points")
                 
                 # Initialize path parameters
                 self.sp = calc_speed_profile(
@@ -417,7 +407,7 @@ class MPCNode(Node):
                 
                 return True
             else:
-                self.get_logger().error(f"Unknown path type: {self.path_type}")
+                self.get_logger().error(f"Unsupported path type: {self.path_type}. Only 'yaml' and 'switch_back' are supported.")
                 return False
                 
         except Exception as e:
@@ -427,7 +417,6 @@ class MPCNode(Node):
     def parameter_update_callback(self, msg):
         """Handle parameter update requests from parameter sweep"""
         try:
-            import json
             update_data = json.loads(msg.data)
             
             if update_data.get('action') == 'update_parameters':
@@ -753,8 +742,6 @@ class MPCNode(Node):
 
 
 def main(args=None):
-    import json
-    
     try:
         rclpy.init(args=args)
         node = MPCNode()

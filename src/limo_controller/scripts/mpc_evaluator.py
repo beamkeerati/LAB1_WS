@@ -59,6 +59,9 @@ class MPCPerformanceEvaluator(Node):
         self.enable_plots = self.get_parameter('enable_plots').value
         self.enable_real_time_plots = self.get_parameter('enable_real_time_plots').value
         
+        # FIX: Expand tilde in save directory path
+        self.save_directory = os.path.expanduser(self.save_directory)
+        
         # Create save directory
         os.makedirs(self.save_directory, exist_ok=True)
         
@@ -522,11 +525,14 @@ class MPCPerformanceEvaluator(Node):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         # Set up the plotting style
-        # FIX: Replaced 'seaborn-v0_8' with the more widely available 'seaborn-darkgrid'
         try:
-            plt.style.use('seaborn-darkgrid')
-        except IOError:
-            self.get_logger().warn("'seaborn-darkgrid' style not found. Using default style.")
+            plt.style.use('seaborn-v0_8')
+        except OSError:
+            try:
+                plt.style.use('seaborn-darkgrid')
+            except OSError:
+                self.get_logger().warn("Seaborn style not available, using default")
+        
         sns.set_palette("husl")
         
         # Create comprehensive figure
@@ -535,7 +541,7 @@ class MPCPerformanceEvaluator(Node):
                     fontsize=16, fontweight='bold')
         
         # Define subplot layout
-        gs = fig.add_gridspec(4, 4, hspace=0.4, wspace=0.4) # Increased spacing for better layout
+        gs = fig.add_gridspec(4, 4, hspace=0.4, wspace=0.4)
         
         # 1. Position and heading errors over time
         ax1 = fig.add_subplot(gs[0, :2])
@@ -603,7 +609,10 @@ class MPCPerformanceEvaluator(Node):
         # 4. Error distribution histograms
         ax7 = fig.add_subplot(gs[3, 0])
         if len(self.metrics['position_errors']) > 0:
-            sns.histplot(list(self.metrics['position_errors']), bins=30, kde=True, ax=ax7, color='blue')
+            try:
+                sns.histplot(list(self.metrics['position_errors']), bins=30, kde=True, ax=ax7, color='blue')
+            except:
+                ax7.hist(list(self.metrics['position_errors']), bins=30, alpha=0.7, color='blue')
             ax7.set_xlabel('Position Error (m)')
             ax7.set_ylabel('Frequency')
             ax7.set_title('Position Error Distribution')
@@ -611,7 +620,10 @@ class MPCPerformanceEvaluator(Node):
         
         ax8 = fig.add_subplot(gs[3, 1])
         if len(self.metrics['heading_errors']) > 0:
-            sns.histplot(np.degrees(list(self.metrics['heading_errors'])), bins=30, kde=True, ax=ax8, color='red')
+            try:
+                sns.histplot(np.degrees(list(self.metrics['heading_errors'])), bins=30, kde=True, ax=ax8, color='red')
+            except:
+                ax8.hist(np.degrees(list(self.metrics['heading_errors'])), bins=30, alpha=0.7, color='red')
             ax8.set_xlabel('Heading Error (deg)')
             ax8.set_ylabel('Frequency')
             ax8.set_title('Heading Error Distribution')
@@ -646,36 +658,15 @@ class MPCPerformanceEvaluator(Node):
                 ax9.legend()
         
         # Save the comprehensive plot
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust for suptitle
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         plt.savefig(f"{self.save_directory}/comprehensive_analysis_{timestamp}.png", 
                    dpi=300, bbox_inches='tight')
         plt.savefig(f"{self.save_directory}/comprehensive_analysis_{timestamp}.pdf", 
                    bbox_inches='tight')
         
-        # Also save individual metric plots
-        self.save_individual_plots(timestamp)
-        
         plt.close(fig)
         self.get_logger().info("Comprehensive plots generated")
         
-    def save_individual_plots(self, timestamp):
-        """Save individual plots for each metric"""
-        metrics_with_data = {k: v for k, v in self.metrics.items() if len(v) > 0}
-        
-        for metric_name, metric_data in metrics_with_data.items():
-            fig, ax = plt.subplots(figsize=(10, 6))
-            
-            time_axis = np.arange(len(metric_data)) / self.sampling_rate
-            ax.plot(time_axis, list(metric_data))
-            ax.set_xlabel('Time (s)')
-            ax.set_ylabel(metric_name.replace('_', ' ').title())
-            ax.set_title(f'{metric_name.replace("_", " ").title()} - {self.experiment_name}')
-            ax.grid(True, alpha=0.3)
-            
-            plt.tight_layout()
-            plt.savefig(f"{self.save_directory}/{metric_name}_{timestamp}.png", dpi=300)
-            plt.close(fig)
-            
     def generate_evaluation_report(self, stats):
         """Generate a comprehensive evaluation report"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -835,7 +826,6 @@ This report presents a comprehensive evaluation of the MPC controller performanc
 - Processed metrics: `metrics_*.json`  
 - Summary statistics: `summary_stats_*.csv`
 - Comprehensive plots: `comprehensive_analysis_*.png`
-- Individual metric plots: `*_*.png`
 
 ---
 *Report generated automatically by MPC Performance Evaluator*

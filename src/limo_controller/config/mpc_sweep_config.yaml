@@ -1,51 +1,51 @@
 parameters:
-  # Target speed - focus on practical range
+  # Target speed - reduced values for testing
   target_speed:
     type: discrete
-    values: [0.5, 0.8, 1.1]
-    description: "Vehicle target speed in m/s - slow, medium, fast"
+    values: [0.5, 0.8]  # Reduced from 3 to 2 values
+    description: "Vehicle target speed in m/s - slow, medium"
     
-  # MPC horizon length - test key values
+  # MPC horizon length - reduced values
   horizon_length:
     type: discrete
-    values: [8, 12, 16]
-    description: "MPC prediction horizon length - short, medium, long"
+    values: [8, 12]  # Reduced from 3 to 2 values
+    description: "MPC prediction horizon length - short, medium"
     
-  # Control time step - critical for stability
+  # Control time step - keep minimal
   control_dt:
     type: discrete
-    values: [0.05, 0.1]
-    description: "MPC control time step - fine vs coarse control"
+    values: [0.1]  # Reduced to 1 value for faster testing
+    description: "MPC control time step - standard"
     
-  # Position tracking weight - most impactful parameter
+  # Position tracking weight - reduced values
   position_weight:
     type: discrete
-    values: [5.0, 15.0, 40.0]
-    description: "Position tracking weight - low, medium, high priority"
+    values: [5.0, 15.0]  # Reduced from 3 to 2 values
+    description: "Position tracking weight - low, medium priority"
     
-  # Yaw tracking weight - critical for path following
+  # Yaw tracking weight - reduced values  
   yaw_weight:
     type: discrete
-    values: [5.0, 20.0, 50.0]
-    description: "Yaw tracking weight - loose, balanced, tight heading"
+    values: [5.0, 20.0]  # Reduced from 3 to 2 values
+    description: "Yaw tracking weight - loose, balanced heading"
     
-  # Control cost weight - affects smoothness vs performance
+  # Control cost weight - keep minimal
   control_weight:
     type: discrete
-    values: [0.1, 0.5]
-    description: "Control cost weight - aggressive vs smooth control"
+    values: [0.1]  # Reduced to 1 value
+    description: "Control cost weight - standard"
     
-  # Maximum steering angle - vehicle constraint
+  # Maximum steering angle - keep minimal
   max_steer_deg:
     type: discrete
-    values: [10.0, 15.0]
-    description: "Maximum steering angle - conservative vs aggressive"
+    values: [10.0]  # Reduced to 1 value
+    description: "Maximum steering angle - standard"
     
-  # Path selection - focus on representative paths
+  # Path selection - only YAML and switch_back paths
   path_type:
     type: discrete
-    values: ["straight", "forward", "switch_back"]
-    description: "Path types - simple, complex curves, challenging maneuvers"
+    values: ["yaml", "switch_back"]
+    description: "Path types - YAML file path or challenging switch-back maneuvers"
 
 # Evaluation metrics to analyze
 evaluation_metrics:
@@ -57,10 +57,10 @@ evaluation_metrics:
   - path_progress
   - velocity_errors
 
-# Experiment settings - optimized timing
+# Experiment settings - reduced timing for faster testing
 experiment_settings:
-  warmup_time: 2.0      # Reduced warmup
-  evaluation_time: 35.0  # Shorter evaluation for more experiments
+  warmup_time: 1.0      # Reduced warmup
+  evaluation_time: 20.0  # Much shorter evaluation for testing
   cooldown_time: 1.0     # Minimal cooldown
   
 # Analysis settings
