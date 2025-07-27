@@ -1,0 +1,163 @@
+<svg width="1400" height="1350" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif" font-size="14">
+    <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#555" />
+        </marker>
+        <style>
+            .box { stroke-width: 2; rx: 8; ry: 8; }
+            .mpc-node { fill: #e0f7fa; stroke: #00796b; }
+            .mpc-lib { fill: #fff3e0; stroke: #f57c00; }
+            .planner { fill: #fce4ec; stroke: #c2185b; }
+            .ros-io { fill: #e8eaf6; stroke: #303f9f; }
+            .data-io { fill: #f1f8e9; stroke: #558b2f; }
+            .title-text { font-size: 20px; font-weight: bold; text-anchor: middle; }
+            .subtitle-text { font-size: 16px; font-weight: bold; text-anchor: middle; }
+            .func-text { font-weight: bold; }
+            .io-text { font-style: italic; fill: #333; }
+            .flow-line { stroke: #555; stroke-width: 2; marker-end: url(#arrow); }
+        </style>
+    </defs>
+
+    <text x="700" y="30" class="title-text">MPC Code Relation and Workflow Diagram</text>
+
+    <g transform="translate(1050, 60)">
+        <rect x="0" y="0" width="300" height="170" fill="#fafafa" stroke="#ccc" stroke-width="1" rx="5"/>
+        <text x="150" y="25" class="subtitle-text">Legend</text>
+        <rect x="20" y="40" width="20" height="20" class="box mpc-node"/>
+        <text x="50" y="55">mpc.py (ROS 2 Node)</text>
+        <rect x="20" y="70" width="20" height="20" class="box mpc-lib"/>
+        <text x="50" y="85">mpc_lib.py (MPC Core)</text>
+        <rect x="20" y="100" width="20" height="20" class="box planner"/>
+        <text x="50" y="115">cubic_spline_planner.py</text>
+        <rect x="20" y="130" width="20" height="20" class="box ros-io"/>
+        <text x="50" y="145">ROS Topic / External</text>
+    </g>
+
+    <g id="offline-phase">
+        <text x="350" y="80" class="subtitle-text">Phase 1: Path Generation (Offline)</text>
+        <rect x="50" y="120" width="180" height="60" class="box data-io"/>
+        <text x="140" y="155" text-anchor="middle">Waypoints (x, y list)</text>
+        
+        <rect x="300" y="100" width="220" height="100" class="box planner"/>
+        <text x="410" y="125" text-anchor="middle" class="func-text">cubic_spline_planner.py</text>
+        <text x="410" y="150" text-anchor="middle">calc_spline_course()</text>
+        <text x="410" y="175" text-anchor="middle" class="io-text">Out: Dense Path (x, y, yaw, k)</text>
+        
+        <rect x="590" y="120" width="180" height="60" class="box data-io"/>
+        <text x="680" y="155" text-anchor="middle">path.yaml</text>
+
+        <path d="M 230 150 H 300" class="flow-line"/>
+        <path d="M 520 150 H 590" class="flow-line"/>
+    </g>
+
+    <line x1="50" y1="230" x2="1350" y2="230" stroke="#999" stroke-width="2" stroke-dasharray="8,4"/>
+    
+    <g id="online-phase">
+        <text x="820" y="270" class="subtitle-text">Phase 2: Runtime Control (Online)</text>
+
+        <g id="mpc-node-col">
+            <rect x="50" y="300" width="300" height="880" class="box mpc-node"/>
+            <text x="200" y="325" text-anchor="middle" class="func-text">mpc.py: MPCNode</text>
+
+            <rect x="80" y="350" width="240" height="70" class="box mpc-node"/>
+            <text x="200" y="375" text-anchor="middle" class="func-text">read_path()</text>
+            <text x="200" y="400" text-anchor="middle" class="io-text">In: path.yaml</text>
+            <path d="M 680 180 V 385 H 320" class="flow-line" fill="none"/>
+
+            <rect x="80" y="440" width="240" height="70" class="box mpc-node"/>
+            <text x="200" y="465" text-anchor="middle" class="func-text">init_path()</text>
+            <text x="200" y="490" text-anchor="middle" class="io-text">Out: cx, cy, cyaw, sp</text>
+            <path d="M 200 420 V 440" class="flow-line"/>
+            
+            <rect x="80" y="550" width="240" height="70" class="box mpc-node"/>
+            <text x="200" y="575" text-anchor="middle" class="func-text">odom_callback()</text>
+            <text x="200" y="600" text-anchor="middle" class="io-text">In: Odometry msg</text>
+            <rect x="80" y="625" width="240" height="50" class="box mpc-node"/>
+            <text x="200" y="655" text-anchor="middle" class="io-text">Stores robot_odom</text>
+            <path d="M 200 605 V 625" class="flow-line"/>
+            
+            <rect x="80" y="720" width="240" height="70" class="box mpc-node"/>
+            <text x="200" y="745" text-anchor="middle" class="func-text">timer_callback()</text>
+            <text x="200" y="770" text-anchor="middle" class="io-text">Triggered by timer (DT)</text>
+
+            <rect x="80" y="810" width="240" height="240" class="box mpc-node"/>
+            <text x="200" y="835" text-anchor="middle" class="func-text">mpc_control()</text>
+            <text x="200" y="860" text-anchor="middle" class="io-text">In: robot_odom</text>
+            <text x="200" y="880" text-anchor="middle">1. get_state() -> current_state</text>
+            <text x="200" y="920" text-anchor="middle">2. Calls calc_ref_trajectory</text>
+            <text x="200" y="960" text-anchor="middle">3. Calls iterative_linear_mpc</text>
+            <text x="200" y="1000" text-anchor="middle" class="io-text">Out: di, ai (1st optimal step)</text>
+            <path d="M 200 790 V 810" class="flow-line"/>
+            <path d="M 200 675 V 810" class="flow-line"/>
+
+            <rect x="80" y="1070" width="240" height="70" class="box mpc-node"/>
+            <text x="200" y="1095" text-anchor="middle" class="func-text">pub_cmd_vel()</text>
+            <text x="200" y="1120" text-anchor="middle" class="io-text">In: di, ai</text>
+            <path d="M 200 1050 V 1070" class="flow-line"/>
+        </g>
+        
+        <g id="mpc-lib-col">
+            <rect x="500" y="300" width="350" height="950" class="box mpc-lib"/>
+            <text x="675" y="325" text-anchor="middle" class="func-text">mpc_lib.py</text>
+            
+            <rect x="530" y="350" width="290" height="80" class="box mpc-lib"/>
+            <text x="675" y="375" text-anchor="middle" class="func-text">calc_speed_profile()</text>
+            <text x="675" y="400" text-anchor="middle" class="io-text">In: path, target_speed</text>
+            <text x="675" y="420" text-anchor="middle" class="io-text">Out: speed_profile</text>
+
+            <rect x="530" y="440" width="290" height="70" class="box mpc-lib"/>
+            <text x="675" y="465" text-anchor="middle" class="func-text">smooth_yaw()</text>
+            <text x="675" y="485" text-anchor="middle" class="io-text">In: cyaw</text>
+            <text x="675" y="500" text-anchor="middle" class="io-text">Out: smoothed_cyaw</text>
+
+            <path d="M 320 475 H 530" class="flow-line"/>
+            <text x="425" y="470" text-anchor="middle">Calls helper funcs</text>
+            
+            <rect x="530" y="550" width="290" height="100" class="box mpc-lib"/>
+            <text x="675" y="575" text-anchor="middle" class="func-text">calc_ref_trajectory()</text>
+            <text x="675" y="600" text-anchor="middle" class="io-text">In: current_state, path data</text>
+            <text x="675" y="620" text-anchor="middle" class="io-text">Calls: calc_nearest_index()</text>
+            <text x="675" y="640" text-anchor="middle" class="io-text">Out: xref (horizon reference)</text>
+            <path d="M 320 925 H 530" class="flow-line"/>
+
+            <rect x="530" y="690" width="290" height="200" class="box mpc-lib"/>
+            <text x="675" y="715" text-anchor="middle" class="func-text">iterative_linear_mpc_control()</text>
+            <text x="675" y="740" text-anchor="middle" class="io-text">In: xref, x0 (current_state)</text>
+            <text x="675" y="770" text-anchor="middle">Loop:</text>
+            <text x="675" y="790" text-anchor="middle">1. predict_motion()</text>
+            <text x="675" y="820" text-anchor="middle">2. linear_mpc_control_casadi()</text>
+            <text x="675" y="850" text-anchor="middle" class="io-text">Out: oa, odelta (optimal sequences)</text>
+            <path d="M 320 965 H 530" class="flow-line"/>
+            <path d="M 675 890 V 930" class="flow-line"/>
+            <path d="M 675 650 V 690" class="flow-line"/>
+            <text x="675" y="675" text-anchor="middle" class="io-text">xref</text>
+            <path d="M 320 1030 H 530" class="flow-line" stroke-dasharray="2,2"/>
+            <text x="425" y="1025" text-anchor="middle">Returns optimal sequences</text>
+
+
+            <rect x="530" y="930" width="290" height="210" class="box mpc-lib"/>
+            <text x="675" y="955" text-anchor="middle" class="func-text">linear_mpc_control_casadi()</text>
+            <text x="675" y="980" text-anchor="middle" class="io-text">In: xref, xbar (predicted traj)</text>
+            <text x="675" y="1005" text-anchor="middle">1. Builds NLP problem</text>
+            <text x="675" y="1025" text-anchor="middle">2. Calls get_linear_model_matrix()</text>
+            <text x="675" y="1050" text-anchor="middle">3. Solves with CasADi/IPOPT</text>
+            <text x="675" y="1075" text-anchor="middle" class="io-text">Out: oa, odelta</text>
+            <path d="M 675 1140 V 1180" class="flow-line"/>
+        </g>
+        
+        <g id="ros-io-col">
+            <rect x="1000" y="550" width="220" height="70" class="box ros-io"/>
+            <text x="1110" y="575" text-anchor="middle" class="func-text">/odometry/ground_truth</text>
+            <text x="1110" y="600" text-anchor="middle">(Odometry Topic)</text>
+            <path d="M 1000 585 H 320" class="flow-line"/>
+            
+            <rect x="1000" y="1070" width="220" height="70" class="box ros-io"/>
+            <text x="1110" y="1095" text-anchor="middle" class="func-text">/cmd_vel</text>
+            <text x="1110" y="1120" text-anchor="middle">(Twist Topic)</text>
+            <path d="M 320 1105 H 1000" class="flow-line"/>
+
+            <rect x="550" y="1190" width="240" height="50" class="box mpc-lib" />
+            <text x="665" y="1220" text-anchor="middle" class="func-text">get_linear_model_matrix()</text>
+        </g>
+    </g>
+</svg>
