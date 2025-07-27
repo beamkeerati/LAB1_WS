@@ -36,7 +36,10 @@ install(PROGRAMS
   scripts/pid.py
   scripts/gps_emulator.py
   scripts/ekf.py
-  scripts/path_tracking_measurement.py
+  scripts/mpc_evaluator.py
+  scripts/parameter_sweep.py
+  config/mpc_sweep_config.yaml
+  scripts/comparative_analyzer.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -57,6 +60,7 @@ install(TARGETS
 ################ INSTALL LAUNCH, ETC #################
 install(DIRECTORY
   # add directories here
+  config
   launch
   path
   DESTINATION share/${PROJECT_NAME}
