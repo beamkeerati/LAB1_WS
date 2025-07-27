@@ -70,18 +70,6 @@ def generate_launch_description():
         parameters=[{"mode": "car"}],
     )
 
-    # NEW: Path tracking measurement node
-    tracking_measurement = Node(
-        package="limo_controller",
-        executable="path_tracking_measurement.py",
-        name="tracking_measurement_node",
-        output="screen",
-        parameters=[
-            {"save_interval": 5.0},  # Save data every 5 seconds
-            {"max_data_points": 5000},
-            {"output_file": "mpc_tracking_results.yaml"},
-        ],
-    )
 
     # Create the launch description and populate
     ld = LaunchDescription()
@@ -116,21 +104,6 @@ def generate_launch_description():
     ld.add_action(odom)
     ld.add_action(inv_kin)
 
-    # Conditionally add tracking measurement
-    ld.add_action(
-        Node(
-            package="limo_controller",
-            executable="path_tracking_measurement.py",
-            name="tracking_measurement_node",
-            output="screen",
-            parameters=[
-                {"save_interval": 5.0},
-                {"max_data_points": 5000},
-                {"output_file": "mpc_tracking_results.yaml"},
-            ],
-            condition=IfCondition(LaunchConfiguration("enable_tracking_measurement")),
-        )
-    )
 
     # FIXED: Use TimerAction to delay MPC launch instead of OnProcessExit
     # This gives the description launch time to initialize before starting MPC
