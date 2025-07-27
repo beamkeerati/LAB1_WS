@@ -34,7 +34,7 @@ def generate_launch_description():
     
     target_speed_arg = DeclareLaunchArgument(
         'target_speed',
-        default_value='0.8',
+        default_value='1.1',
         description='Target speed for MPC controller'
     )
     
@@ -162,7 +162,7 @@ def generate_launch_description():
             {'evaluation_duration': LaunchConfiguration('duration')},
             {'save_directory': LaunchConfiguration('save_directory')},
             {'enable_plots': True},
-            {'enable_real_time_plots': False}
+            {'enable_real_time_plots': True}
         ]
     )
     

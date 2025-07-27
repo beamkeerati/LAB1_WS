@@ -46,7 +46,7 @@ class MPCPerformanceEvaluator(Node):
         # Evaluation parameters
         self.declare_parameter('experiment_name', 'mpc_evaluation')
         self.declare_parameter('evaluation_duration', 120.0)  # seconds
-        self.declare_parameter('save_directory', '~/mpc_evaluation')
+        self.declare_parameter('save_directory', '/tmp/mpc_evaluation')
         self.declare_parameter('sampling_rate', 20.0)  # Hz
         self.declare_parameter('enable_plots', True)
         self.declare_parameter('enable_real_time_plots', False)
