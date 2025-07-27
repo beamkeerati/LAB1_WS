@@ -59,7 +59,7 @@ evaluation_metrics:
 # Experiment settings - reduced timing for faster testing
 experiment_settings:
   warmup_time: 1.0      # Reduced warmup
-  evaluation_time: 20.0  # Much shorter evaluation for testing
+  evaluation_time: 60.0  # Much shorter evaluation for testing
   cooldown_time: 1.0     # Minimal cooldown
   
 # Analysis settings
