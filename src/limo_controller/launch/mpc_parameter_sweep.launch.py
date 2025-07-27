@@ -34,13 +34,13 @@ def generate_launch_description():
     
     experiment_duration_arg = DeclareLaunchArgument(
         'experiment_duration',
-        default_value='120.0',  # Reduced for faster testing
+        default_value='200.0',  # Reduced for faster testing
         description='Maximum duration of each experiment in seconds'
     )
     
     timeout_duration_arg = DeclareLaunchArgument(
         'timeout_duration',
-        default_value='120.0',  # Reduced timeout
+        default_value='150.0',  # Reduced timeout
         description='Timeout duration for experiments that hang'
     )
     
