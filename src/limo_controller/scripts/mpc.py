@@ -16,7 +16,7 @@ from geometry_msgs.msg import (
     TransformStamped,
 )
 from nav_msgs.msg import Odometry, Path
-from std_msgs.msg import Float64, Float64MultiArray
+from std_msgs.msg import Float64, Float64MultiArray, String
 from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
 import math
@@ -49,7 +49,12 @@ from limo_controller.mpc_lib import (
     smooth_yaw,
     calc_nearest_index,
     calc_ref_trajectory,
-    iterative_linear_mpc_control
+    iterative_linear_mpc_control,
+    get_straight_course,
+    get_straight_course2, 
+    get_straight_course3,
+    get_forward_course,
+    get_switch_back_course
 )
 
 
@@ -168,6 +173,26 @@ class MPCConfig:
                 cls.MAX_STEER = math.radians(max_steer_deg)
                 node.get_logger().info(f"Updated MAX_STEER to {max_steer_deg} degrees")
 
+            # NEW: Update Q matrix weights
+            if node.has_parameter("position_weight"):
+                pos_weight = node.get_parameter("position_weight").get_parameter_value().double_value
+                cls.Q[0, 0] = pos_weight  # x position weight
+                cls.Q[1, 1] = pos_weight  # y position weight
+                cls.Qf = cls.Q * 2.0  # Update terminal cost
+                node.get_logger().info(f"Updated position weight to {pos_weight}")
+
+            if node.has_parameter("yaw_weight"):
+                yaw_weight = node.get_parameter("yaw_weight").get_parameter_value().double_value
+                cls.Q[3, 3] = yaw_weight  # yaw weight
+                cls.Qf = cls.Q * 2.0  # Update terminal cost
+                node.get_logger().info(f"Updated yaw weight to {yaw_weight}")
+
+            if node.has_parameter("control_weight"):
+                ctrl_weight = node.get_parameter("control_weight").get_parameter_value().double_value
+                cls.R[0, 0] = ctrl_weight  # acceleration weight
+                cls.R[1, 1] = ctrl_weight * 10  # steering weight (higher)
+                node.get_logger().info(f"Updated control weight to {ctrl_weight}")
+
         except Exception as e:
             node.get_logger().warn(f"Error updating parameters from ROS: {e}")
 
@@ -185,6 +210,16 @@ class MPCNode(Node):
         self._declare_parameter_if_not_exists(
             "max_steer_deg", math.degrees(MPCConfig.MAX_STEER)
         )
+        
+        # NEW: Parameter sweep related parameters
+        self._declare_parameter_if_not_exists("position_weight", 10.0)
+        self._declare_parameter_if_not_exists("yaw_weight", 15.0)
+        self._declare_parameter_if_not_exists("control_weight", 0.1)
+        
+        # NEW: Path selection parameters
+        self._declare_parameter_if_not_exists("path_type", "yaml")  # Default to YAML
+        self._declare_parameter_if_not_exists("use_yaml_path", True)  # Backward compatibility
+        self._declare_parameter_if_not_exists("yaml_path_file", "path.yaml")  # Custom YAML file
 
         # Update config from ROS parameters
         MPCConfig.update_from_ros_params(self)
@@ -206,10 +241,32 @@ class MPCNode(Node):
                 f"Using default target_speed: {self.target_speed} m/s"
             )
 
+        # Get path configuration parameters
+        try:
+            self.path_type = self.get_parameter("path_type").get_parameter_value().string_value
+        except:
+            self.path_type = "yaml"
+
+        try:
+            self.use_yaml_path = self.get_parameter("use_yaml_path").get_parameter_value().bool_value
+        except:
+            self.use_yaml_path = True
+
+        try:
+            self.yaml_path_file = self.get_parameter("yaml_path_file").get_parameter_value().string_value
+        except:
+            self.yaml_path_file = "path.yaml"
+
         # Set up subscribers and timer
         self.odom_sub = self.create_subscription(
             Odometry, "/odometry/ground_truth", self.odom_callback, 10
         )
+        
+        # NEW: Subscribe to parameter update commands
+        self.param_update_sub = self.create_subscription(
+            String, "/mpc/parameter_update", self.parameter_update_callback, 10
+        )
+        
         self.create_timer(MPCConfig.DT, self.timer_callback)
         self.robot_odom = None
 
@@ -219,16 +276,17 @@ class MPCNode(Node):
         self.reference_pub = self.create_publisher(
             PoseStamped, "/mpc/reference_pose", 10
         )
+        
+        # NEW: Publisher for experiment status
+        self.status_pub = self.create_publisher(String, "/mpc/experiment_status", 10)
 
-        # Load the path from YAML
-        self.path = self.read_path()
-        self.path_index = 0
-        self.get_logger().info(
-            f"Loaded path with {self.path.shape[0]} points."
-            if self.path is not None
-            else "Path not loaded!"
-        )
-
+        # Initialize path based on configuration
+        self.path_loaded = self.initialize_path()
+        
+        if not self.path_loaded:
+            self.get_logger().error("Failed to load any path - controller inactive")
+            return
+        
         # Publish the full path
         self.publish_path()
 
@@ -257,12 +315,17 @@ class MPCNode(Node):
         self.stuck_counter = 0  # Track if robot gets stuck
         self.last_target_ind = 0
 
+        # NEW: Goal tracking for parameter sweep
+        self.goal_reached = False
+        self.experiment_start_time = None
+
         # Initialize MPC
-        if self.path is not None:
-            self.init_path()
+        if self.path_loaded:
             self.init_mpc()
+            path_source = "YAML file" if self.use_yaml_path else f"built-in generator ({self.path_type})"
+            self.get_logger().info(f"MPC Controller initialized with path from: {path_source}")
         else:
-            self.get_logger().error("Failed to load path - controller inactive")
+            self.get_logger().error("Failed to initialize MPC - no valid path")
 
     def _declare_parameter_if_not_exists(self, name, default_value):
         """Helper method to declare parameter only if it doesn't exist"""
@@ -271,11 +334,19 @@ class MPCNode(Node):
         except ParameterAlreadyDeclaredException:
             pass
 
-    def read_path(self):
-        """Load path from YAML file"""
+    def initialize_path(self):
+        """Initialize path based on configuration parameters"""
+        # Determine path source based on parameters
+        if self.use_yaml_path or self.path_type == "yaml":
+            return self.load_path_from_yaml()
+        else:
+            return self.generate_path_from_type()
+
+    def load_path_from_yaml(self):
+        """Load path from YAML file (original method)"""
         try:
             pkg = get_package_share_directory("limo_controller")
-            yaml_path = os.path.join(pkg, "path", "path.yaml")
+            yaml_path = os.path.join(pkg, "path", self.yaml_path_file)
 
             with open(yaml_path, "r") as file:
                 data = yaml.safe_load(file)
@@ -294,55 +365,157 @@ class MPCNode(Node):
 
             if len(path_points) < 2:
                 self.get_logger().error("Path must have at least 2 points")
-                return None
+                return False
 
-            return np.array(path_points)
+            path_array = np.array(path_points)
+            self.cx = path_array[:, 0]
+            self.cy = path_array[:, 1]
+            self.cyaw = path_array[:, 2]
+            self.ck = [0.0] * len(self.cx)
+
+            # Initialize path parameters
+            self.sp = calc_speed_profile(
+                self.cx, self.cy, self.cyaw, MPCConfig.TARGET_SPEED, MPCConfig
+            )
+            self.dl = calculate_path_distance(self.cx, self.cy)
+            self.cyaw = smooth_yaw(self.cyaw, MPCConfig)
+
+            self.get_logger().info(f"Loaded path from YAML file: {yaml_path} with {len(self.cx)} points")
+            return True
 
         except FileNotFoundError:
             self.get_logger().error(f"Path file not found: {yaml_path}")
-            return None
+            return False
         except Exception as e:
             self.get_logger().error(f"Error reading path file: {e}")
-            return None
+            return False
+
+    def generate_path_from_type(self):
+        """Generate path based on path_type parameter (new method)"""
+        try:
+            # Calculate path distance for interpolation
+            dl = 0.1  # Default path resolution
+            
+            path_generators = {
+                "straight": get_straight_course,
+                "straight2": get_straight_course2,
+                "straight3": get_straight_course3,
+                "forward": get_forward_course,
+                "switch_back": get_switch_back_course
+            }
+            
+            if self.path_type in path_generators:
+                self.cx, self.cy, self.cyaw, self.ck = path_generators[self.path_type](dl)
+                self.get_logger().info(f"Generated {self.path_type} path with {len(self.cx)} points")
+                
+                # Initialize path parameters
+                self.sp = calc_speed_profile(
+                    self.cx, self.cy, self.cyaw, MPCConfig.TARGET_SPEED, MPCConfig
+                )
+                self.dl = calculate_path_distance(self.cx, self.cy)
+                self.cyaw = smooth_yaw(self.cyaw, MPCConfig)
+                
+                return True
+            else:
+                self.get_logger().error(f"Unknown path type: {self.path_type}")
+                return False
+                
+        except Exception as e:
+            self.get_logger().error(f"Error generating path: {e}")
+            return False
+
+    def parameter_update_callback(self, msg):
+        """Handle parameter update requests from parameter sweep"""
+        try:
+            import json
+            update_data = json.loads(msg.data)
+            
+            if update_data.get('action') == 'update_parameters':
+                params = update_data.get('parameters', {})
+                
+                # Update ROS parameters
+                param_updates = []
+                for param_name, param_value in params.items():
+                    param_updates.append(rclpy.parameter.Parameter(param_name, value=param_value))
+                
+                # Set parameters
+                self.set_parameters(param_updates)
+                
+                # Update config
+                MPCConfig.update_from_ros_params(self)
+                
+                # Handle path type changes
+                if 'path_type' in params:
+                    old_path_type = self.path_type
+                    self.path_type = params['path_type']
+                    
+                    # Update path source logic
+                    if self.path_type == "yaml":
+                        self.use_yaml_path = True
+                    else:
+                        self.use_yaml_path = False
+                    
+                    # Regenerate path if needed
+                    if self.path_type != old_path_type:
+                        if self.initialize_path():
+                            self.publish_path()
+                            self.init_mpc()
+                            self.get_logger().info(f"Path changed from {old_path_type} to {self.path_type}")
+                        else:
+                            self.get_logger().error(f"Failed to load new path type: {self.path_type}")
+                            return
+                
+                # Handle YAML path file changes
+                if 'yaml_path_file' in params:
+                    self.yaml_path_file = params['yaml_path_file']
+                    if self.use_yaml_path:
+                        if self.initialize_path():
+                            self.publish_path()
+                            self.init_mpc()
+                        else:
+                            self.get_logger().error(f"Failed to load YAML path: {self.yaml_path_file}")
+                            return
+                
+                # Reset experiment state
+                self.goal_reached = False
+                self.experiment_start_time = self.get_clock().now()
+                self.emergency_stop = False
+                self.mpc_failed_count = 0
+                
+                # Publish status
+                status_msg = String()
+                status_msg.data = json.dumps({
+                    'status': 'parameters_updated',
+                    'parameters': params
+                })
+                self.status_pub.publish(status_msg)
+                
+                self.get_logger().info(f"Parameters updated: {params}")
+                
+        except Exception as e:
+            self.get_logger().error(f"Error updating parameters: {e}")
 
     def publish_path(self):
         """Publish path for visualization"""
-        if self.path is None:
+        if not hasattr(self, 'cx') or self.cx is None:
             return
 
         path_msg = Path()
         path_msg.header.stamp = self.get_clock().now().to_msg()
         path_msg.header.frame_id = "world"
 
-        for point in self.path:
+        for i in range(len(self.cx)):
             pose_stamped = PoseStamped()
             pose_stamped.header.stamp = self.get_clock().now().to_msg()
             pose_stamped.header.frame_id = "world"
-            pose_stamped.pose.position.x = point[0]
-            pose_stamped.pose.position.y = point[1]
+            pose_stamped.pose.position.x = self.cx[i]
+            pose_stamped.pose.position.y = self.cy[i]
             pose_stamped.pose.position.z = 0.0
-            q = quaternion_from_euler(0, 0, point[2])
+            q = quaternion_from_euler(0, 0, self.cyaw[i])
             pose_stamped.pose.orientation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
             path_msg.poses.append(pose_stamped)
 
         self.path_pub.publish(path_msg)
-
-    def init_path(self):
-        """Initialize path parameters"""
-        self.cx = self.path[:, 0]
-        self.cy = self.path[:, 1]
-        self.cyaw = self.path[:, 2]
-        self.ck = [0.0] * len(self.cx)
-
-        self.sp = calc_speed_profile(
-            self.cx, self.cy, self.cyaw, MPCConfig.TARGET_SPEED, MPCConfig
-        )
-        self.dl = calculate_path_distance(self.cx, self.cy)
-        self.cyaw = smooth_yaw(self.cyaw, MPCConfig)
-
-        self.get_logger().info(
-            "MPC Controller initialized with robot-matched parameters"
-        )
 
     def init_mpc(self):
         """Initialize MPC state"""
@@ -381,7 +554,7 @@ class MPCNode(Node):
 
     def mpc_control(self):
         """MPC control function with improved error handling"""
-        if self.path is None:
+        if not hasattr(self, 'cx') or self.cx is None:
             self.get_logger().warn("No path available for MPC control")
             return
 
@@ -409,7 +582,15 @@ class MPCNode(Node):
 
         # Check if goal reached
         if self.check_goal(self.state, self.goal, self.target_ind, len(self.cx)):
-            self.get_logger().info("Goal reached!")
+            if not self.goal_reached:
+                self.goal_reached = True
+                self.get_logger().info("Goal reached!")
+                
+                # Publish goal reached status
+                status_msg = String()
+                status_msg.data = json.dumps({'status': 'goal_reached'})
+                self.status_pub.publish(status_msg)
+                
             self.pub_emergency_stop()
             return
 
@@ -471,6 +652,11 @@ class MPCNode(Node):
                     )
                     self.emergency_stop = True
                     self.pub_emergency_stop()
+                    
+                    # Publish failure status
+                    status_msg = String()
+                    status_msg.data = json.dumps({'status': 'experiment_failed'})
+                    self.status_pub.publish(status_msg)
                     return
 
                 # Use conservative fallback control
@@ -532,14 +718,6 @@ class MPCNode(Node):
         )
 
         v = robot_odom.twist.twist.linear.x
-        # if robot_odom.twist.twist.linear.x > 0:
-        #     v = np.hypot(
-        #         robot_odom.twist.twist.linear.x, robot_odom.twist.twist.linear.y
-        #     )
-        # else:
-        #     v = -np.hypot(
-        #         robot_odom.twist.twist.linear.x, robot_odom.twist.twist.linear.y
-        #     )
 
         return State(x=x, y=y, yaw=yaw, v=v)
 
@@ -575,11 +753,13 @@ class MPCNode(Node):
 
 
 def main(args=None):
+    import json
+    
     try:
         rclpy.init(args=args)
         node = MPCNode()
 
-        if node.path is None:
+        if not node.path_loaded:
             node.get_logger().error(
                 "Failed to initialize MPC controller - no valid path"
             )

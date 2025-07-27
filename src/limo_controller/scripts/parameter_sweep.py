@@ -19,6 +19,7 @@ from datetime import datetime
 from itertools import product
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
+from std_msgs.msg import String
 
 
 class MPCParameterSweep(Node):
@@ -26,7 +27,7 @@ class MPCParameterSweep(Node):
     Automated parameter sweep experiment for MPC controller evaluation.
     
     This node systematically varies MPC parameters and evaluates performance
-    to understand controller behavior and optimal parameter selection.
+    sequentially - one experiment completes before the next begins.
     """
     
     def __init__(self):
@@ -34,17 +35,15 @@ class MPCParameterSweep(Node):
         
         # Declare parameters for the sweep experiment
         self.declare_parameter('sweep_config_file', 'mpc_sweep_config.yaml')
-        self.declare_parameter('results_directory', '/tmp/mpc_parameter_sweep')
-        self.declare_parameter('experiment_duration', 60.0)  # Duration per experiment
-        self.declare_parameter('max_concurrent_experiments', 1)  # Safety: run one at a time
-        self.declare_parameter('enable_parallel', False)  # Enable parallel execution
+        self.declare_parameter('results_directory', '~/mpc_parameter_sweep')
+        self.declare_parameter('experiment_duration', 60.0)  # Max duration per experiment
+        self.declare_parameter('timeout_duration', 80.0)  # Timeout if experiment hangs
         
         # Get parameters
         self.sweep_config_file = self.get_parameter('sweep_config_file').value
         self.results_directory = self.get_parameter('results_directory').value
         self.experiment_duration = self.get_parameter('experiment_duration').value
-        self.max_concurrent = self.get_parameter('max_concurrent_experiments').value
-        self.enable_parallel = self.get_parameter('enable_parallel').value
+        self.timeout_duration = self.get_parameter('timeout_duration').value
         
         # Create results directory
         os.makedirs(self.results_directory, exist_ok=True)
@@ -58,26 +57,57 @@ class MPCParameterSweep(Node):
         # Results storage
         self.experiment_results = []
         
+        # Experiment control
+        self.current_experiment_id = 0
+        self.experiment_running = False
+        self.experiment_start_time = None
+        self.mpc_process = None
+        self.evaluator_process = None
+        
+        # Publishers and subscribers for communication with MPC node
+        self.param_update_pub = self.create_publisher(String, "/mpc/parameter_update", 10)
+        self.status_sub = self.create_subscription(
+            String, "/mpc/experiment_status", self.status_callback, 10
+        )
+        
+        # Timer for experiment management
+        self.experiment_timer = self.create_timer(2.0, self.experiment_management_callback)
+        
         self.get_logger().info(f"Parameter sweep initialized")
         self.get_logger().info(f"Total experiments: {len(self.parameter_combinations)}")
         self.get_logger().info(f"Estimated duration: {len(self.parameter_combinations) * self.experiment_duration / 60:.1f} minutes")
         
         # Start the parameter sweep
-        self.run_parameter_sweep()
+        self.start_simulation_processes()
         
     def load_sweep_config(self):
         """Load parameter sweep configuration"""
         try:
-            with open(self.sweep_config_file, 'r') as f:
+            config_path = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)), 
+                'config', 
+                self.sweep_config_file
+            )
+            
+            with open(config_path, 'r') as f:
                 config = yaml.safe_load(f)
+                
+            self.get_logger().info(f"Loaded sweep config from: {config_path}")
+            return config
+            
         except FileNotFoundError:
             # Create default configuration if file doesn't exist
             config = self.create_default_sweep_config()
-            with open(self.sweep_config_file, 'w') as f:
+            config_path = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)), 
+                'config', 
+                self.sweep_config_file
+            )
+            os.makedirs(os.path.dirname(config_path), exist_ok=True)
+            with open(config_path, 'w') as f:
                 yaml.dump(config, f, default_flow_style=False)
-            self.get_logger().info(f"Created default sweep config: {self.sweep_config_file}")
-        
-        return config
+            self.get_logger().info(f"Created default sweep config: {config_path}")
+            return config
     
     def create_default_sweep_config(self):
         """Create default parameter sweep configuration"""
@@ -85,35 +115,39 @@ class MPCParameterSweep(Node):
             'parameters': {
                 'target_speed': {
                     'type': 'linear',
-                    'min': 0.3,
-                    'max': 1.2,
-                    'steps': 4
+                    'min': 0.4,
+                    'max': 1.0,
+                    'steps': 3
                 },
                 'horizon_length': {
                     'type': 'discrete',
-                    'values': [8, 10, 15, 20]
+                    'values': [8, 12, 16]
                 },
                 'control_dt': {
                     'type': 'discrete', 
-                    'values': [0.05, 0.1, 0.2]
+                    'values': [0.05, 0.1]
                 },
                 'position_weight': {
                     'type': 'logarithmic',
-                    'min': 1.0,
+                    'min': 5.0,
                     'max': 50.0,
-                    'steps': 4
+                    'steps': 3
                 },
                 'yaw_weight': {
                     'type': 'logarithmic',
-                    'min': 1.0,
+                    'min': 5.0,
                     'max': 50.0,
-                    'steps': 4
+                    'steps': 3
                 },
                 'max_steer_deg': {
                     'type': 'linear',
-                    'min': 5.0,
+                    'min': 8.0,
                     'max': 15.0,
-                    'steps': 3
+                    'steps': 2
+                },
+                'path_type': {
+                    'type': 'discrete',
+                    'values': ["straight", "forward", "switch_back"]
                 }
             },
             'evaluation_metrics': [
@@ -125,9 +159,9 @@ class MPCParameterSweep(Node):
                 'path_progress'
             ],
             'experiment_settings': {
-                'warmup_time': 5.0,
-                'evaluation_time': 50.0,
-                'cooldown_time': 5.0
+                'warmup_time': 3.0,
+                'evaluation_time': 45.0,
+                'cooldown_time': 2.0
             }
         }
         
@@ -166,170 +200,191 @@ class MPCParameterSweep(Node):
         
         return combinations
     
-    def run_parameter_sweep(self):
-        """Execute the parameter sweep experiment"""
-        self.get_logger().info("Starting parameter sweep...")
-        
-        if self.enable_parallel and self.max_concurrent > 1:
-            self.run_parallel_sweep()
-        else:
-            self.run_sequential_sweep()
-        
-        # Generate comprehensive analysis
-        self.generate_sweep_analysis()
-        
-        self.get_logger().info("Parameter sweep completed!")
-        
-    def run_sequential_sweep(self):
-        """Run experiments sequentially"""
-        total_experiments = len(self.parameter_combinations)
-        
-        for i, params in enumerate(self.parameter_combinations):
-            self.get_logger().info(f"Running experiment {i+1}/{total_experiments}")
-            self.get_logger().info(f"Parameters: {params}")
+    def start_simulation_processes(self):
+        """Start the simulation and MPC processes"""
+        try:
+            # Launch Gazebo simulation
+            self.get_logger().info("Starting Gazebo simulation...")
+            self.sim_process = subprocess.Popen([
+                'ros2', 'launch', 'limo_description', 'limo_ackerman_gz_path.launch.py'
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             
-            try:
-                # Run single experiment
-                result = self.run_single_experiment(params, i)
-                if result is not None:
-                    self.experiment_results.append(result)
-                else:
-                    self.get_logger().warn(f"Experiment {i+1} failed")
-                    
-            except Exception as e:
-                self.get_logger().error(f"Error in experiment {i+1}: {e}")
-                continue
+            # Wait for simulation to start
+            time.sleep(10.0)
             
-            # Small delay between experiments
-            time.sleep(2.0)
+            # Launch MPC controller
+            self.get_logger().info("Starting MPC controller...")
+            self.mpc_process = subprocess.Popen([
+                'ros2', 'run', 'limo_controller', 'mpc.py'
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            # Wait for MPC controller to initialize
+            time.sleep(5.0)
+            
+            # Start first experiment
+            self.start_next_experiment()
+            
+        except Exception as e:
+            self.get_logger().error(f"Error starting simulation processes: {e}")
     
-    def run_parallel_sweep(self):
-        """Run experiments in parallel (use with caution)"""
-        self.get_logger().info(f"Running {self.max_concurrent} experiments in parallel")
+    def start_next_experiment(self):
+        """Start the next experiment in the sequence"""
+        if self.current_experiment_id >= len(self.parameter_combinations):
+            self.get_logger().info("All experiments completed!")
+            self.complete_parameter_sweep()
+            return
         
-        with ProcessPoolExecutor(max_workers=self.max_concurrent) as executor:
-            futures = []
-            
-            for i, params in enumerate(self.parameter_combinations):
-                future = executor.submit(self.run_single_experiment, params, i)
-                futures.append(future)
-            
-            # Collect results
-            for i, future in enumerate(futures):
-                try:
-                    result = future.result(timeout=self.experiment_duration + 30)
-                    if result is not None:
-                        self.experiment_results.append(result)
-                    else:
-                        self.get_logger().warn(f"Experiment {i+1} failed")
-                except Exception as e:
-                    self.get_logger().error(f"Error in parallel experiment {i+1}: {e}")
-    
-    def run_single_experiment(self, parameters, experiment_id):
-        """Run a single parameter experiment"""
-        experiment_name = f"sweep_exp_{experiment_id:03d}"
+        # Get current parameters
+        params = self.parameter_combinations[self.current_experiment_id]
+        experiment_name = f"sweep_exp_{self.current_experiment_id:03d}"
         
-        # Create experiment-specific directory
+        self.get_logger().info(f"Starting experiment {self.current_experiment_id + 1}/{len(self.parameter_combinations)}")
+        self.get_logger().info(f"Parameters: {params}")
+        
+        # Create experiment directory
         exp_dir = os.path.join(self.results_directory, experiment_name)
         os.makedirs(exp_dir, exist_ok=True)
         
         # Save experiment parameters
         with open(os.path.join(exp_dir, 'parameters.json'), 'w') as f:
-            json.dump(parameters, f, indent=2)
+            json.dump(params, f, indent=2)
         
         try:
-            # Launch MPC controller with specific parameters
-            mpc_process = self.launch_mpc_controller(parameters)
+            # Launch evaluator for this experiment
+            self.evaluator_process = subprocess.Popen([
+                'ros2', 'run', 'limo_controller', 'mpc_evaluator.py',
+                '--ros-args',
+                '-p', f'experiment_name:={experiment_name}',
+                '-p', f'evaluation_duration:={self.experiment_duration - 5}',
+                '-p', f'save_directory:={exp_dir}',
+                '-p', 'enable_plots:=true',
+                '-p', 'enable_real_time_plots:=false'
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             
-            # Launch evaluator
-            evaluator_process = self.launch_evaluator(experiment_name, exp_dir)
-            
-            # Wait for experiment to complete
-            time.sleep(self.experiment_duration)
-            
-            # Terminate processes
-            self.terminate_process(mpc_process)
-            self.terminate_process(evaluator_process)
-            
-            # Wait a bit for files to be written
+            # Wait a moment for evaluator to start
             time.sleep(2.0)
             
-            # Load and parse results
-            result = self.parse_experiment_results(exp_dir, parameters, experiment_id)
+            # Send parameter update to MPC controller
+            self.send_parameter_update(params)
             
-            return result
+            # Set experiment state
+            self.experiment_running = True
+            self.experiment_start_time = time.time()
             
         except Exception as e:
-            self.get_logger().error(f"Error running experiment {experiment_id}: {e}")
-            return None
+            self.get_logger().error(f"Error starting experiment {self.current_experiment_id}: {e}")
+            self.finish_current_experiment(success=False)
     
-    def launch_mpc_controller(self, parameters):
-        """Launch MPC controller with specified parameters"""
-        cmd = [
-            'ros2', 'run', 'limo_controller', 'mpc.py',
-            '--ros-args',
-            '-p', f'target_speed:={parameters.get("target_speed", 0.8)}',
-            '-p', f'horizon_length:={int(parameters.get("horizon_length", 10))}',
-            '-p', f'control_dt:={parameters.get("control_dt", 0.1)}',
-            '-p', f'max_steer_deg:={parameters.get("max_steer_deg", 10.0)}'
-        ]
+    def send_parameter_update(self, parameters):
+        """Send parameter update message to MPC controller"""
+        try:
+            update_msg = String()
+            update_data = {
+                'action': 'update_parameters',
+                'parameters': parameters
+            }
+            update_msg.data = json.dumps(update_data)
+            self.param_update_pub.publish(update_msg)
+            self.get_logger().info("Parameter update sent to MPC controller")
+            
+        except Exception as e:
+            self.get_logger().error(f"Error sending parameter update: {e}")
+    
+    def status_callback(self, msg):
+        """Handle status messages from MPC controller"""
+        try:
+            status_data = json.loads(msg.data)
+            status = status_data.get('status')
+            
+            if status == 'goal_reached':
+                self.get_logger().info(f"Experiment {self.current_experiment_id} completed successfully - goal reached")
+                self.finish_current_experiment(success=True)
+                
+            elif status == 'experiment_failed':
+                self.get_logger().warn(f"Experiment {self.current_experiment_id} failed - MPC failure")
+                self.finish_current_experiment(success=False)
+                
+            elif status == 'parameters_updated':
+                self.get_logger().info(f"Parameters updated for experiment {self.current_experiment_id}")
+                
+        except Exception as e:
+            self.get_logger().error(f"Error processing status message: {e}")
+    
+    def experiment_management_callback(self):
+        """Manage experiment timeouts and progression"""
+        if not self.experiment_running:
+            return
         
-        # Add position and yaw weights if they exist (these would need to be added to your MPC node)
-        if 'position_weight' in parameters:
-            cmd.extend(['-p', f'position_weight:={parameters["position_weight"]}'])
-        if 'yaw_weight' in parameters:
-            cmd.extend(['-p', f'yaw_weight:={parameters["yaw_weight"]}'])
+        # Check for timeout
+        if self.experiment_start_time is not None:
+            elapsed_time = time.time() - self.experiment_start_time
+            
+            if elapsed_time > self.timeout_duration:
+                self.get_logger().warn(f"Experiment {self.current_experiment_id} timed out after {elapsed_time:.1f}s")
+                self.finish_current_experiment(success=False)
+    
+    def finish_current_experiment(self, success=True):
+        """Finish the current experiment and prepare for the next"""
+        if not self.experiment_running:
+            return
         
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.experiment_running = False
         
-        # Give it time to start
+        # Terminate evaluator process
+        if self.evaluator_process is not None:
+            try:
+                self.evaluator_process.terminate()
+                self.evaluator_process.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                self.evaluator_process.kill()
+                self.evaluator_process.wait()
+            except Exception as e:
+                self.get_logger().warn(f"Error terminating evaluator: {e}")
+            finally:
+                self.evaluator_process = None
+        
+        # Wait for files to be written
         time.sleep(3.0)
         
-        return process
+        # Parse and store results
+        if success:
+            result = self.parse_experiment_results()
+            if result is not None:
+                self.experiment_results.append(result)
+            else:
+                self.get_logger().warn(f"Failed to parse results for experiment {self.current_experiment_id}")
+        else:
+            # Create a failure record
+            params = self.parameter_combinations[self.current_experiment_id]
+            result = {
+                'experiment_id': self.current_experiment_id,
+                'parameters': params.copy(),
+                'success': False,
+                'metrics': {}
+            }
+            self.experiment_results.append(result)
+        
+        # Move to next experiment
+        self.current_experiment_id += 1
+        
+        # Wait between experiments
+        time.sleep(5.0)
+        
+        # Start next experiment
+        self.start_next_experiment()
     
-    def launch_evaluator(self, experiment_name, save_dir):
-        """Launch performance evaluator"""
-        cmd = [
-            'ros2', 'run', 'limo_controller', 'mpc_evaluator.py',
-            '--ros-args',
-            '-p', f'experiment_name:={experiment_name}',
-            '-p', f'evaluation_duration:={self.experiment_duration - 10}',  # Slightly shorter
-            '-p', f'save_directory:={save_dir}',
-            '-p', 'enable_plots:=true',
-            '-p', 'enable_real_time_plots:=false'
-        ]
-        
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        
-        # Give it time to start
-        time.sleep(2.0)
-        
-        return process
-    
-    def terminate_process(self, process):
-        """Safely terminate a process"""
-        if process is None:
-            return
+    def parse_experiment_results(self):
+        """Parse results from the current experiment"""
+        try:
+            experiment_name = f"sweep_exp_{self.current_experiment_id:03d}"
+            exp_dir = os.path.join(self.results_directory, experiment_name)
             
-        try:
-            # Try graceful termination first
-            process.terminate()
-            process.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            # Force kill if necessary
-            process.kill()
-            process.wait()
-        except Exception as e:
-            self.get_logger().warn(f"Error terminating process: {e}")
-    
-    def parse_experiment_results(self, exp_dir, parameters, experiment_id):
-        """Parse results from an experiment"""
-        try:
             # Find the most recent summary statistics file
-            summary_files = [f for f in os.listdir(exp_dir) if f.startswith('summary_stats_') and f.endswith('.json')]
+            summary_files = [f for f in os.listdir(exp_dir) 
+                           if f.startswith('summary_stats_') and f.endswith('.json')]
             
             if not summary_files:
-                self.get_logger().warn(f"No summary statistics found for experiment {experiment_id}")
+                self.get_logger().warn(f"No summary statistics found for experiment {self.current_experiment_id}")
                 return None
             
             # Use the most recent file
@@ -339,9 +394,11 @@ class MPCParameterSweep(Node):
                 stats = json.load(f)
             
             # Extract key metrics
+            params = self.parameter_combinations[self.current_experiment_id]
             result = {
-                'experiment_id': experiment_id,
-                'parameters': parameters.copy(),
+                'experiment_id': self.current_experiment_id,
+                'parameters': params.copy(),
+                'success': True,
                 'metrics': {}
             }
             
@@ -360,15 +417,48 @@ class MPCParameterSweep(Node):
             return result
             
         except Exception as e:
-            self.get_logger().error(f"Error parsing results for experiment {experiment_id}: {e}")
+            self.get_logger().error(f"Error parsing results for experiment {self.current_experiment_id}: {e}")
             return None
+    
+    def complete_parameter_sweep(self):
+        """Complete the parameter sweep and generate analysis"""
+        self.get_logger().info("Parameter sweep completed! Generating analysis...")
+        
+        # Terminate processes
+        if self.mpc_process is not None:
+            try:
+                self.mpc_process.terminate()
+                self.mpc_process.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                self.mpc_process.kill()
+                self.mpc_process.wait()
+            except Exception as e:
+                self.get_logger().warn(f"Error terminating MPC process: {e}")
+        
+        if hasattr(self, 'sim_process') and self.sim_process is not None:
+            try:
+                self.sim_process.terminate()
+                self.sim_process.wait(timeout=10.0)
+            except subprocess.TimeoutExpired:
+                self.sim_process.kill()
+                self.sim_process.wait()
+            except Exception as e:
+                self.get_logger().warn(f"Error terminating simulation: {e}")
+        
+        # Generate comprehensive analysis
+        if self.experiment_results:
+            self.generate_sweep_analysis()
+        else:
+            self.get_logger().error("No experiment results to analyze")
+        
+        self.get_logger().info("Parameter sweep analysis completed!")
+        
+        # Shutdown the node
+        self.destroy_node()
+        rclpy.shutdown()
     
     def generate_sweep_analysis(self):
         """Generate comprehensive analysis of parameter sweep results"""
-        if not self.experiment_results:
-            self.get_logger().error("No experiment results to analyze")
-            return
-        
         self.get_logger().info("Generating parameter sweep analysis...")
         
         # Convert results to DataFrame for analysis
@@ -381,11 +471,13 @@ class MPCParameterSweep(Node):
         # Generate analysis plots
         self.generate_parameter_correlation_plots(df, timestamp)
         self.generate_sensitivity_analysis(df, timestamp)
-        self.generate_pareto_analysis(df, timestamp)
-        self.generate_parameter_heatmaps(df, timestamp)
+        self.generate_path_comparison_plots(df, timestamp)
         
         # Generate recommendations
         self.generate_parameter_recommendations(df, timestamp)
+        
+        # Generate summary report
+        self.generate_summary_report(df, timestamp)
         
         self.get_logger().info(f"Analysis complete! Results saved to {self.results_directory}")
     
@@ -394,16 +486,20 @@ class MPCParameterSweep(Node):
         rows = []
         
         for result in self.experiment_results:
-            row = {'experiment_id': result['experiment_id']}
+            row = {
+                'experiment_id': result['experiment_id'],
+                'success': result.get('success', True)
+            }
             
             # Add parameters
             for param_name, param_value in result['parameters'].items():
                 row[f'param_{param_name}'] = param_value
             
-            # Add metrics
-            for metric_name, metric_stats in result['metrics'].items():
-                for stat_name, stat_value in metric_stats.items():
-                    row[f'{metric_name}_{stat_name}'] = stat_value
+            # Add metrics (only for successful experiments)
+            if result.get('success', True) and 'metrics' in result:
+                for metric_name, metric_stats in result['metrics'].items():
+                    for stat_name, stat_value in metric_stats.items():
+                        row[f'{metric_name}_{stat_name}'] = stat_value
             
             rows.append(row)
         
@@ -411,6 +507,13 @@ class MPCParameterSweep(Node):
     
     def generate_parameter_correlation_plots(self, df, timestamp):
         """Generate correlation plots between parameters and performance"""
+        # Filter only successful experiments
+        df_success = df[df['success'] == True].copy()
+        
+        if len(df_success) == 0:
+            self.get_logger().warn("No successful experiments for correlation analysis")
+            return
+        
         fig, axes = plt.subplots(2, 3, figsize=(18, 12))
         fig.suptitle('Parameter vs Performance Correlation Analysis', fontsize=16)
         
@@ -424,18 +527,19 @@ class MPCParameterSweep(Node):
             'path_progress_max'
         ]
         
-        param_cols = [col for col in df.columns if col.startswith('param_')]
+        param_cols = [col for col in df_success.columns if col.startswith('param_') and col != 'param_path_type']
         
         for i, metric in enumerate(key_metrics):
-            if metric not in df.columns:
+            if metric not in df_success.columns:
                 continue
                 
             ax = axes[i//3, i%3]
             
             # Create correlation plot for each parameter
             for param in param_cols:
-                if param in df.columns:
-                    ax.scatter(df[param], df[metric], label=param.replace('param_', ''), alpha=0.6)
+                if param in df_success.columns:
+                    ax.scatter(df_success[param], df_success[metric], 
+                             label=param.replace('param_', ''), alpha=0.6)
             
             ax.set_xlabel('Parameter Value')
             ax.set_ylabel(metric.replace('_', ' ').title())
@@ -450,16 +554,26 @@ class MPCParameterSweep(Node):
     
     def generate_sensitivity_analysis(self, df, timestamp):
         """Generate parameter sensitivity analysis"""
-        param_cols = [col for col in df.columns if col.startswith('param_')]
-        metric_cols = [col for col in df.columns if 'rms' in col or 'mean' in col]
+        # Filter only successful experiments
+        df_success = df[df['success'] == True].copy()
+        
+        if len(df_success) == 0:
+            self.get_logger().warn("No successful experiments for sensitivity analysis")
+            return
+        
+        param_cols = [col for col in df_success.columns if col.startswith('param_') and col != 'param_path_type']
+        metric_cols = [col for col in df_success.columns if 'rms' in col or 'mean' in col]
+        
+        if len(param_cols) == 0 or len(metric_cols) == 0:
+            return
         
         # Calculate sensitivity (normalized correlation coefficients)
         sensitivity_matrix = np.zeros((len(param_cols), len(metric_cols)))
         
         for i, param in enumerate(param_cols):
             for j, metric in enumerate(metric_cols):
-                if param in df.columns and metric in df.columns:
-                    corr = df[param].corr(df[metric])
+                if param in df_success.columns and metric in df_success.columns:
+                    corr = df_success[param].corr(df_success[metric])
                     sensitivity_matrix[i, j] = abs(corr) if not np.isnan(corr) else 0
         
         # Create heatmap
@@ -475,332 +589,201 @@ class MPCParameterSweep(Node):
                    dpi=300, bbox_inches='tight')
         plt.close()
     
-    def generate_pareto_analysis(self, df, timestamp):
-        """Generate Pareto frontier analysis for multi-objective optimization"""
-        # Use position error and control effort as competing objectives
-        if 'position_errors_rms' in df.columns and 'control_effort_mean' in df.columns:
-            
-            fig, ax = plt.subplots(figsize=(10, 8))
-            
-            scatter = ax.scatter(df['position_errors_rms'], df['control_effort_mean'], 
-                               c=df['experiment_id'], cmap='viridis', alpha=0.7)
-            
-            # Find Pareto frontier (simplified approach)
-            pareto_indices = self.find_pareto_frontier(
-                df['position_errors_rms'].values, 
-                df['control_effort_mean'].values
-            )
-            
-            if len(pareto_indices) > 0:
-                pareto_points = df.iloc[pareto_indices]
-                ax.plot(pareto_points['position_errors_rms'], 
-                       pareto_points['control_effort_mean'], 
-                       'r-', linewidth=2, label='Pareto Frontier')
-                ax.scatter(pareto_points['position_errors_rms'], 
-                          pareto_points['control_effort_mean'], 
-                          c='red', s=100, marker='*', label='Pareto Optimal')
-            
-            ax.set_xlabel('Position Error RMS (m)')
-            ax.set_ylabel('Control Effort Mean')
-            ax.set_title('Pareto Analysis: Tracking Accuracy vs Control Effort')
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-            
-            plt.colorbar(scatter, label='Experiment ID')
-            plt.tight_layout()
-            plt.savefig(os.path.join(self.results_directory, f'pareto_analysis_{timestamp}.png'), 
-                       dpi=300, bbox_inches='tight')
-            plt.close()
-    
-    def find_pareto_frontier(self, obj1, obj2):
-        """Find Pareto frontier for two objectives (both to be minimized)"""
-        n_points = len(obj1)
-        pareto_indices = []
+    def generate_path_comparison_plots(self, df, timestamp):
+        """Generate plots comparing performance across different path types"""
+        # Filter only successful experiments
+        df_success = df[df['success'] == True].copy()
         
-        for i in range(n_points):
-            is_pareto = True
-            for j in range(n_points):
-                if i != j:
-                    # Check if point j dominates point i
-                    if obj1[j] <= obj1[i] and obj2[j] <= obj2[i] and (obj1[j] < obj1[i] or obj2[j] < obj2[i]):
-                        is_pareto = False
-                        break
-            
-            if is_pareto:
-                pareto_indices.append(i)
-        
-        return pareto_indices
-    
-    def generate_parameter_heatmaps(self, df, timestamp):
-        """Generate heatmaps for parameter interactions"""
-        param_cols = [col for col in df.columns if col.startswith('param_')]
-        
-        if len(param_cols) < 2:
+        if 'param_path_type' not in df_success.columns:
             return
         
-        # Focus on key performance metric
-        performance_metric = 'position_errors_rms'
+        # Key metrics for comparison
+        metrics = ['position_errors_rms', 'heading_errors_rms', 'cross_track_errors_rms']
         
-        if performance_metric not in df.columns:
-            return
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        fig.suptitle('Performance Comparison Across Path Types', fontsize=16)
         
-        # Generate heatmaps for parameter pairs
-        n_params = len(param_cols)
-        n_pairs = min(6, n_params * (n_params - 1) // 2)  # Limit to 6 pairs
-        
-        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-        fig.suptitle(f'Parameter Interaction Heatmaps - {performance_metric.replace("_", " ").title()}', fontsize=16)
-        
-        pair_count = 0
-        for i in range(n_params):
-            for j in range(i + 1, n_params):
-                if pair_count >= 6:
-                    break
+        for i, metric in enumerate(metrics):
+            if metric in df_success.columns:
+                # Box plot for each path type
+                path_types = df_success['param_path_type'].unique()
+                data_for_boxplot = [df_success[df_success['param_path_type'] == pt][metric].values 
+                                  for pt in path_types]
                 
-                param1, param2 = param_cols[i], param_cols[j]
-                ax = axes[pair_count // 3, pair_count % 3]
-                
-                # Create pivot table for heatmap
-                try:
-                    # Discretize continuous parameters for heatmap
-                    df_temp = df.copy()
-                    df_temp[f'{param1}_binned'] = pd.cut(df_temp[param1], bins=5, labels=False)
-                    df_temp[f'{param2}_binned'] = pd.cut(df_temp[param2], bins=5, labels=False)
-                    
-                    pivot_table = df_temp.pivot_table(
-                        values=performance_metric,
-                        index=f'{param1}_binned',
-                        columns=f'{param2}_binned',
-                        aggfunc='mean'
-                    )
-                    
-                    sns.heatmap(pivot_table, annot=True, fmt='.3f', cmap='RdYlBu_r', ax=ax)
-                    ax.set_title(f'{param1.replace("param_", "")} vs {param2.replace("param_", "")}')
-                    ax.set_xlabel(param2.replace('param_', '').replace('_', ' ').title())
-                    ax.set_ylabel(param1.replace('param_', '').replace('_', ' ').title())
-                    
-                except Exception as e:
-                    # Fallback to scatter plot if heatmap fails
-                    scatter = ax.scatter(df[param2], df[param1], c=df[performance_metric], cmap='RdYlBu_r')
-                    ax.set_xlabel(param2.replace('param_', '').replace('_', ' ').title())
-                    ax.set_ylabel(param1.replace('param_', '').replace('_', ' ').title())
-                    ax.set_title(f'{param1.replace("param_", "")} vs {param2.replace("param_", "")}')
-                    plt.colorbar(scatter, ax=ax)
-                
-                pair_count += 1
-        
-        # Hide empty subplots
-        for idx in range(pair_count, 6):
-            axes[idx // 3, idx % 3].set_visible(False)
+                axes[i].boxplot(data_for_boxplot, labels=path_types)
+                axes[i].set_title(metric.replace('_', ' ').title())
+                axes[i].set_ylabel('Error Value')
+                axes[i].grid(True, alpha=0.3)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.results_directory, f'parameter_heatmaps_{timestamp}.png'), 
+        plt.savefig(os.path.join(self.results_directory, f'path_comparison_{timestamp}.png'), 
                    dpi=300, bbox_inches='tight')
         plt.close()
     
     def generate_parameter_recommendations(self, df, timestamp):
         """Generate parameter tuning recommendations"""
-        # Find best performing parameter sets
-        key_metrics = ['position_errors_rms', 'heading_errors_rms', 'cross_track_errors_rms']
+        # Filter only successful experiments
+        df_success = df[df['success'] == True].copy()
         
-        recommendations = {
-            'best_overall': {},
-            'best_tracking': {},
-            'best_stability': {},
-            'parameter_insights': {},
-            'trade_offs': {}
-        }
-        
-        # Best overall (weighted combination)
-        if all(metric in df.columns for metric in key_metrics):
-            # Normalize metrics and compute weighted score
-            df_norm = df.copy()
-            weights = {'position_errors_rms': 0.4, 'heading_errors_rms': 0.3, 'cross_track_errors_rms': 0.3}
-            
-            combined_score = 0
-            for metric, weight in weights.items():
-                metric_norm = (df[metric] - df[metric].min()) / (df[metric].max() - df[metric].min())
-                combined_score += weight * metric_norm
-            
-            best_idx = combined_score.idxmin()
-            recommendations['best_overall'] = {
-                'experiment_id': df.loc[best_idx, 'experiment_id'],
-                'parameters': {col.replace('param_', ''): df.loc[best_idx, col] 
-                             for col in df.columns if col.startswith('param_')},
-                'performance': {metric: df.loc[best_idx, metric] for metric in key_metrics}
-            }
-        
-        # Best tracking accuracy
-        if 'position_errors_rms' in df.columns:
-            best_tracking_idx = df['position_errors_rms'].idxmin()
-            recommendations['best_tracking'] = {
-                'experiment_id': df.loc[best_tracking_idx, 'experiment_id'],
-                'parameters': {col.replace('param_', ''): df.loc[best_tracking_idx, col] 
-                             for col in df.columns if col.startswith('param_')},
-                'position_error': df.loc[best_tracking_idx, 'position_errors_rms']
-            }
-        
-        # Best stability (lowest control variation)
-        if 'control_smoothness_rms' in df.columns:
-            best_stability_idx = df['control_smoothness_rms'].idxmin()
-            recommendations['best_stability'] = {
-                'experiment_id': df.loc[best_stability_idx, 'experiment_id'],
-                'parameters': {col.replace('param_', ''): df.loc[best_stability_idx, col] 
-                             for col in df.columns if col.startswith('param_')},
-                'control_smoothness': df.loc[best_stability_idx, 'control_smoothness_rms']
-            }
-        
-        # Parameter insights (correlation analysis)
-        param_cols = [col for col in df.columns if col.startswith('param_')]
-        for param in param_cols:
-            param_name = param.replace('param_', '')
-            insights = {}
-            
-            for metric in key_metrics:
-                if metric in df.columns:
-                    corr = df[param].corr(df[metric])
-                    if not np.isnan(corr):
-                        if abs(corr) > 0.3:  # Significant correlation
-                            insights[metric] = {
-                                'correlation': corr,
-                                'interpretation': 'increases' if corr > 0 else 'decreases'
-                            }
-            
-            if insights:
-                recommendations['parameter_insights'][param_name] = insights
-        
-        # Trade-off analysis
-        if 'position_errors_rms' in df.columns and 'control_effort_mean' in df.columns:
-            # Find parameters that balance accuracy and control effort
-            pos_norm = (df['position_errors_rms'] - df['position_errors_rms'].min()) / \
-                      (df['position_errors_rms'].max() - df['position_errors_rms'].min())
-            ctrl_norm = (df['control_effort_mean'] - df['control_effort_mean'].min()) / \
-                       (df['control_effort_mean'].max() - df['control_effort_mean'].min())
-            
-            balance_score = pos_norm + ctrl_norm
-            balanced_idx = balance_score.idxmin()
-            
-            recommendations['trade_offs']['balanced_performance'] = {
-                'experiment_id': df.loc[balanced_idx, 'experiment_id'],
-                'parameters': {col.replace('param_', ''): df.loc[balanced_idx, col] 
-                             for col in df.columns if col.startswith('param_')},
-                'position_error': df.loc[balanced_idx, 'position_errors_rms'],
-                'control_effort': df.loc[balanced_idx, 'control_effort_mean']
-            }
+        if len(df_success) == 0:
+            recommendations = {'message': 'No successful experiments to analyze'}
+        else:
+            recommendations = self._analyze_successful_experiments(df_success)
         
         # Save recommendations
         with open(os.path.join(self.results_directory, f'parameter_recommendations_{timestamp}.json'), 'w') as f:
             json.dump(recommendations, f, indent=2)
         
-        # Generate readable report
-        self.generate_recommendations_report(recommendations, timestamp)
+        return recommendations
+    
+    def _analyze_successful_experiments(self, df_success):
+        """Analyze successful experiments for recommendations"""
+        recommendations = {
+            'best_overall': {},
+            'best_by_path': {},
+            'parameter_insights': {},
+            'success_rate': {}
+        }
+        
+        # Calculate success rate by parameter
+        total_experiments = len(self.experiment_results)
+        successful_experiments = len(df_success)
+        recommendations['success_rate']['overall'] = successful_experiments / total_experiments
+        
+        # Best overall performance
+        key_metrics = ['position_errors_rms', 'heading_errors_rms', 'cross_track_errors_rms']
+        
+        if all(metric in df_success.columns for metric in key_metrics):
+            # Normalize metrics and compute weighted score
+            df_norm = df_success.copy()
+            weights = {'position_errors_rms': 0.4, 'heading_errors_rms': 0.3, 'cross_track_errors_rms': 0.3}
+            
+            combined_score = 0
+            for metric, weight in weights.items():
+                metric_range = df_success[metric].max() - df_success[metric].min()
+                if metric_range > 0:
+                    metric_norm = (df_success[metric] - df_success[metric].min()) / metric_range
+                    combined_score += weight * metric_norm
+            
+            best_idx = combined_score.idxmin()
+            recommendations['best_overall'] = {
+                'experiment_id': int(df_success.loc[best_idx, 'experiment_id']),
+                'parameters': {col.replace('param_', ''): df_success.loc[best_idx, col] 
+                             for col in df_success.columns if col.startswith('param_')},
+                'performance': {metric: float(df_success.loc[best_idx, metric]) for metric in key_metrics}
+            }
+        
+        # Best by path type
+        if 'param_path_type' in df_success.columns and 'position_errors_rms' in df_success.columns:
+            for path_type in df_success['param_path_type'].unique():
+                path_data = df_success[df_success['param_path_type'] == path_type]
+                if len(path_data) > 0:
+                    best_idx = path_data['position_errors_rms'].idxmin()
+                    recommendations['best_by_path'][path_type] = {
+                        'experiment_id': int(path_data.loc[best_idx, 'experiment_id']),
+                        'parameters': {col.replace('param_', ''): path_data.loc[best_idx, col] 
+                                     for col in path_data.columns if col.startswith('param_')},
+                        'position_error': float(path_data.loc[best_idx, 'position_errors_rms'])
+                    }
         
         return recommendations
     
-    def generate_recommendations_report(self, recommendations, timestamp):
-        """Generate human-readable recommendations report"""
+    def generate_summary_report(self, df, timestamp):
+        """Generate a comprehensive summary report"""
+        total_experiments = len(self.parameter_combinations)
+        successful_experiments = len(df[df['success'] == True])
+        failed_experiments = total_experiments - successful_experiments
+        
         report = f"""
-# MPC Parameter Tuning Recommendations
+# MPC Parameter Sweep Summary Report
 
 **Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-**Total Experiments:** {len(self.experiment_results)}
+**Total Experiments:** {total_experiments}
+**Successful Experiments:** {successful_experiments} ({successful_experiments/total_experiments*100:.1f}%)
+**Failed Experiments:** {failed_experiments} ({failed_experiments/total_experiments*100:.1f}%)
 
-## Best Parameter Sets
+## Experiment Overview
 
-### Best Overall Performance
+The parameter sweep tested {len(self.parameter_combinations)} different parameter combinations across:
 """
         
-        if 'best_overall' in recommendations and recommendations['best_overall']:
-            best = recommendations['best_overall']
-            report += f"""
-**Experiment ID:** {best['experiment_id']}
-
-**Parameters:**
-"""
-            for param, value in best['parameters'].items():
-                report += f"- {param.replace('_', ' ').title()}: {value:.4f}\n"
+        for param_name, param_config in self.sweep_config['parameters'].items():
+            if param_config['type'] == 'discrete':
+                values = param_config['values']
+                report += f"- **{param_name.replace('_', ' ').title()}:** {len(values)} values ({values})\n"
+            else:
+                steps = param_config.get('steps', 'N/A')
+                min_val = param_config.get('min', 'N/A')
+                max_val = param_config.get('max', 'N/A')
+                report += f"- **{param_name.replace('_', ' ').title()}:** {steps} steps from {min_val} to {max_val}\n"
+        
+        if successful_experiments > 0:
+            df_success = df[df['success'] == True]
             
-            report += "\n**Performance:**\n"
-            for metric, value in best['performance'].items():
-                report += f"- {metric.replace('_', ' ').title()}: {value:.4f}\n"
+            # Performance summary
+            if 'position_errors_rms' in df_success.columns:
+                report += f"""
+## Performance Summary (Successful Experiments Only)
+
+### Position Tracking
+- **Best Position Error:** {df_success['position_errors_rms'].min():.4f} m
+- **Worst Position Error:** {df_success['position_errors_rms'].max():.4f} m
+- **Average Position Error:** {df_success['position_errors_rms'].mean():.4f} m
+"""
+            
+            if 'param_path_type' in df_success.columns:
+                report += "\n### Performance by Path Type\n"
+                for path_type in df_success['param_path_type'].unique():
+                    path_data = df_success[df_success['param_path_type'] == path_type]
+                    count = len(path_data)
+                    if 'position_errors_rms' in path_data.columns:
+                        avg_error = path_data['position_errors_rms'].mean()
+                        report += f"- **{path_type.title()}:** {count} experiments, avg error: {avg_error:.4f} m\n"
         
-        if 'best_tracking' in recommendations and recommendations['best_tracking']:
-            best_track = recommendations['best_tracking']
+        # Failure analysis
+        if failed_experiments > 0:
+            df_failed = df[df['success'] == False]
             report += f"""
-### Best Tracking Accuracy
-**Experiment ID:** {best_track['experiment_id']}
-**Position Error:** {best_track['position_error']:.4f} m
+## Failure Analysis
 
-**Parameters:**
+{failed_experiments} experiments failed to complete successfully. Common failure modes may include:
+- MPC solver convergence issues
+- Robot getting stuck or lost
+- Simulation instabilities
+- Parameter combinations that are infeasible
+
 """
-            for param, value in best_track['parameters'].items():
-                report += f"- {param.replace('_', ' ').title()}: {value:.4f}\n"
-        
-        if 'best_stability' in recommendations and recommendations['best_stability']:
-            best_stable = recommendations['best_stability']
-            report += f"""
-### Best Control Stability
-**Experiment ID:** {best_stable['experiment_id']}
-**Control Smoothness:** {best_stable['control_smoothness']:.4f}
-
-**Parameters:**
-"""
-            for param, value in best_stable['parameters'].items():
-                report += f"- {param.replace('_', ' ').title()}: {value:.4f}\n"
-        
-        # Parameter insights
-        if 'parameter_insights' in recommendations:
-            report += """
-## Parameter Insights
-
-### Significant Parameter Effects
-"""
-            for param, insights in recommendations['parameter_insights'].items():
-                report += f"\n**{param.replace('_', ' ').title()}:**\n"
-                for metric, effect in insights.items():
-                    direction = "worsens" if effect['interpretation'] == 'increases' else "improves"
-                    report += f"- {direction} {metric.replace('_', ' ')} (correlation: {effect['correlation']:.3f})\n"
-        
-        # Trade-offs
-        if 'trade_offs' in recommendations and 'balanced_performance' in recommendations['trade_offs']:
-            balanced = recommendations['trade_offs']['balanced_performance']
-            report += f"""
-## Balanced Performance Recommendation
-
-For applications requiring a balance between tracking accuracy and control effort:
-
-**Experiment ID:** {balanced['experiment_id']}
-**Position Error:** {balanced['position_error']:.4f} m
-**Control Effort:** {balanced['control_effort']:.4f}
-
-**Parameters:**
-"""
-            for param, value in balanced['parameters'].items():
-                report += f"- {param.replace('_', ' ').title()}: {value:.4f}\n"
+            
+            # Analyze failure patterns by parameter if possible
+            if 'param_path_type' in df_failed.columns:
+                report += "### Failures by Path Type:\n"
+                for path_type in df_failed['param_path_type'].unique():
+                    path_failures = len(df_failed[df_failed['param_path_type'] == path_type])
+                    report += f"- **{path_type.title()}:** {path_failures} failures\n"
         
         report += """
-## General Tuning Guidelines
-
-1. **For Better Tracking:** Increase position and yaw weights, consider longer horizon
-2. **For Smoother Control:** Increase control cost weights, reduce target speed
-3. **For Faster Response:** Decrease control time step, increase steering limits
-4. **For Robustness:** Use moderate parameter values, avoid extremes
-
 ## Files Generated
 
-- `sweep_results_*.csv` - Raw experimental data
-- `parameter_correlations_*.png` - Parameter vs performance plots
+- `sweep_results_*.csv` - Complete experimental data
+- `parameter_correlations_*.png` - Parameter vs performance analysis
 - `sensitivity_analysis_*.png` - Parameter sensitivity heatmap
-- `pareto_analysis_*.png` - Multi-objective optimization analysis
-- `parameter_heatmaps_*.png` - Parameter interaction effects
-- `parameter_recommendations_*.json` - Detailed recommendations data
+- `path_comparison_*.png` - Performance comparison across path types
+- `parameter_recommendations_*.json` - Best parameter sets
+- Individual experiment folders with detailed results
+
+## Next Steps
+
+1. Review the best performing parameter sets in the recommendations file
+2. Examine correlation plots to understand parameter effects
+3. Consider running additional experiments around promising parameter regions
+4. Test the recommended parameters in real-world scenarios
 
 ---
 *Generated by MPC Parameter Sweep Tool*
 """
         
         # Save the report
-        with open(os.path.join(self.results_directory, f'tuning_recommendations_{timestamp}.md'), 'w') as f:
+        with open(os.path.join(self.results_directory, f'sweep_summary_{timestamp}.md'), 'w') as f:
             f.write(report)
 
 
@@ -809,7 +792,7 @@ def main(args=None):
     
     try:
         sweep_node = MPCParameterSweep()
-        # The node completes its work in __init__ and then exits
+        rclpy.spin(sweep_node)
         
     except KeyboardInterrupt:
         print("Parameter sweep interrupted by user")

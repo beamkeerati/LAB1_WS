@@ -1,61 +1,51 @@
 parameters:
-  # Target speed parameter sweep
+  # Target speed - focus on practical range
   target_speed:
-    type: linear
-    min: 0.3
-    max: 1.2
-    steps: 5
-    description: "Vehicle target speed in m/s"
+    type: discrete
+    values: [0.5, 0.8, 1.1]
+    description: "Vehicle target speed in m/s - slow, medium, fast"
     
-  # MPC horizon length  
+  # MPC horizon length - test key values
   horizon_length:
     type: discrete
-    values: [6, 8, 10, 12, 15, 20]
-    description: "MPC prediction horizon length"
+    values: [8, 12, 16]
+    description: "MPC prediction horizon length - short, medium, long"
     
-  # Control time step
+  # Control time step - critical for stability
   control_dt:
     type: discrete
-    values: [0.05, 0.1, 0.15, 0.2]
-    description: "MPC control time step in seconds"
+    values: [0.05, 0.1]
+    description: "MPC control time step - fine vs coarse control"
     
-  # Position tracking weight (Q matrix)
+  # Position tracking weight - most impactful parameter
   position_weight:
-    type: logarithmic
-    min: 1.0
-    max: 100.0
-    steps: 5
-    description: "Position tracking weight in MPC cost function"
-    
-  # Yaw tracking weight (Q matrix)
-  yaw_weight:
-    type: logarithmic  
-    min: 1.0
-    max: 100.0
-    steps: 5
-    description: "Yaw tracking weight in MPC cost function"
-    
-  # Control cost weight (R matrix)
-  control_weight:
-    type: logarithmic
-    min: 0.01
-    max: 10.0
-    steps: 4
-    description: "Control cost weight in MPC cost function"
-    
-  # Maximum steering angle
-  max_steer_deg:
-    type: linear
-    min: 5.0
-    max: 20.0
-    steps: 4
-    description: "Maximum steering angle in degrees"
-    
-  # N_IND_SEARCH parameter
-  lookahead_distance:
     type: discrete
-    values: [10, 20, 30, 50]
-    description: "Path lookahead search distance"
+    values: [5.0, 15.0, 40.0]
+    description: "Position tracking weight - low, medium, high priority"
+    
+  # Yaw tracking weight - critical for path following
+  yaw_weight:
+    type: discrete
+    values: [5.0, 20.0, 50.0]
+    description: "Yaw tracking weight - loose, balanced, tight heading"
+    
+  # Control cost weight - affects smoothness vs performance
+  control_weight:
+    type: discrete
+    values: [0.1, 0.5]
+    description: "Control cost weight - aggressive vs smooth control"
+    
+  # Maximum steering angle - vehicle constraint
+  max_steer_deg:
+    type: discrete
+    values: [10.0, 15.0]
+    description: "Maximum steering angle - conservative vs aggressive"
+    
+  # Path selection - focus on representative paths
+  path_type:
+    type: discrete
+    values: ["straight", "forward", "switch_back"]
+    description: "Path types - simple, complex curves, challenging maneuvers"
 
 # Evaluation metrics to analyze
 evaluation_metrics:
@@ -67,14 +57,14 @@ evaluation_metrics:
   - path_progress
   - velocity_errors
 
-# Experiment settings
+# Experiment settings - optimized timing
 experiment_settings:
-  warmup_time: 5.0      # Time to let system stabilize
-  evaluation_time: 50.0  # Main evaluation period
-  cooldown_time: 5.0     # Time to safely shutdown
+  warmup_time: 2.0      # Reduced warmup
+  evaluation_time: 35.0  # Shorter evaluation for more experiments
+  cooldown_time: 1.0     # Minimal cooldown
   
 # Analysis settings
 analysis_settings:
   statistical_significance: 0.05
   correlation_threshold: 0.3
-  improvement_threshold: 5.0  # Minimum % improvement to be significant
+  improvement_threshold: 5.0

@@ -17,7 +17,7 @@ from launch.substitutions import PathJoinSubstitution
 from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
-    """Launch file for single MPC evaluation experiment"""
+    """Launch file for single MPC evaluation experiment with dual path support"""
     
     # Declare arguments
     experiment_name_arg = DeclareLaunchArgument(
@@ -56,6 +56,50 @@ def generate_launch_description():
         description='Directory to save results'
     )
     
+    # NEW: Path configuration arguments
+    path_type_arg = DeclareLaunchArgument(
+        'path_type',
+        default_value='yaml',
+        description='Path type: yaml, straight, straight2, straight3, forward, switch_back'
+    )
+    
+    use_yaml_path_arg = DeclareLaunchArgument(
+        'use_yaml_path',
+        default_value='true',
+        description='Use YAML file for path (true) or built-in generator (false)'
+    )
+    
+    yaml_path_file_arg = DeclareLaunchArgument(
+        'yaml_path_file',
+        default_value='path.yaml',
+        description='YAML path file name (when use_yaml_path=true)'
+    )
+    
+    # NEW: MPC tuning parameters
+    position_weight_arg = DeclareLaunchArgument(
+        'position_weight',
+        default_value='10.0',
+        description='Position tracking weight in MPC cost function'
+    )
+    
+    yaw_weight_arg = DeclareLaunchArgument(
+        'yaw_weight',
+        default_value='15.0',
+        description='Yaw tracking weight in MPC cost function'
+    )
+    
+    control_weight_arg = DeclareLaunchArgument(
+        'control_weight',
+        default_value='0.1',
+        description='Control cost weight in MPC cost function'
+    )
+    
+    max_steer_deg_arg = DeclareLaunchArgument(
+        'max_steer_deg',
+        default_value='10.0',
+        description='Maximum steering angle in degrees'
+    )
+    
     # Robot description and simulation launch
     pkg_limo_controller = get_package_share_directory("limo_controller")
     pkg_limo_description = get_package_share_directory("limo_description")
@@ -86,7 +130,7 @@ def generate_launch_description():
         parameters=[{'mode': 'car'}]
     )
     
-    # MPC controller with parameters
+    # MPC controller with enhanced parameters
     mpc_controller = Node(
         package='limo_controller',
         executable='mpc.py',
@@ -96,6 +140,13 @@ def generate_launch_description():
             {'target_speed': LaunchConfiguration('target_speed')},
             {'horizon_length': LaunchConfiguration('horizon_length')},
             {'control_dt': LaunchConfiguration('control_dt')},
+            {'max_steer_deg': LaunchConfiguration('max_steer_deg')},
+            {'position_weight': LaunchConfiguration('position_weight')},
+            {'yaw_weight': LaunchConfiguration('yaw_weight')},
+            {'control_weight': LaunchConfiguration('control_weight')},
+            {'path_type': LaunchConfiguration('path_type')},
+            {'use_yaml_path': LaunchConfiguration('use_yaml_path')},
+            {'yaml_path_file': LaunchConfiguration('yaml_path_file')},
             {'mode': 'car'}
         ]
     )
@@ -134,6 +185,13 @@ def generate_launch_description():
         horizon_arg,
         control_dt_arg,
         save_dir_arg,
+        path_type_arg,
+        use_yaml_path_arg,
+        yaml_path_file_arg,
+        position_weight_arg,
+        yaw_weight_arg,
+        control_weight_arg,
+        max_steer_deg_arg,
         limo_description,
         forward_kinematics,
         inverse_kinematics,

@@ -17,7 +17,7 @@ from launch.substitutions import PathJoinSubstitution
 from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
-    """Launch file for automated parameter sweep"""
+    """Launch file for automated parameter sweep - SEQUENTIAL VERSION"""
     
     # Declare arguments
     sweep_config_arg = DeclareLaunchArgument(
@@ -35,52 +35,16 @@ def generate_launch_description():
     experiment_duration_arg = DeclareLaunchArgument(
         'experiment_duration',
         default_value='60.0',
-        description='Duration of each experiment in seconds'
+        description='Maximum duration of each experiment in seconds'
     )
     
-    parallel_arg = DeclareLaunchArgument(
-        'enable_parallel',
-        default_value='false',
-        description='Enable parallel experiment execution'
+    timeout_duration_arg = DeclareLaunchArgument(
+        'timeout_duration',
+        default_value='80.0',
+        description='Timeout duration for experiments that hang'
     )
     
-    max_concurrent_arg = DeclareLaunchArgument(
-        'max_concurrent',
-        default_value='1',
-        description='Maximum concurrent experiments'
-    )
-    
-    # Robot simulation (will be restarted for each experiment)
-    pkg_limo_controller = get_package_share_directory("limo_controller")
-    pkg_limo_description = get_package_share_directory("limo_description")
-
-    # Description launch
-    limo_description = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                pkg_limo_description, "launch", "ign", "limo_ackerman_gz_path.launch.py"
-            )
-        )
-    )
-
-        
-    # Forward and inverse kinematics
-    forward_kinematics = Node(
-        package='limo_controller',
-        executable='forward_kinematics.py',
-        name='fk_node',
-        output='screen'
-    )
-    
-    inverse_kinematics = Node(
-        package='limo_controller',
-        executable='inverse_kinematics.py', 
-        name='ik_node',
-        output='screen',
-        parameters=[{'mode': 'car'}]
-    )
-    
-    # Parameter sweep controller
+    # Parameter sweep controller - this now manages everything internally
     parameter_sweep = Node(
         package='limo_controller',
         executable='parameter_sweep.py',
@@ -90,25 +54,14 @@ def generate_launch_description():
             {'sweep_config_file': LaunchConfiguration('sweep_config')},
             {'results_directory': LaunchConfiguration('results_directory')},
             {'experiment_duration': LaunchConfiguration('experiment_duration')},
-            {'enable_parallel': LaunchConfiguration('enable_parallel')},
-            {'max_concurrent_experiments': LaunchConfiguration('max_concurrent')}
+            {'timeout_duration': LaunchConfiguration('timeout_duration')}
         ]
-    )
-    
-    # Delayed start for parameter sweep (after simulation is ready)
-    delayed_sweep = TimerAction(
-        period=10.0,
-        actions=[parameter_sweep]
     )
     
     return LaunchDescription([
         sweep_config_arg,
         results_dir_arg,
         experiment_duration_arg,
-        parallel_arg,
-        max_concurrent_arg,
-        limo_description,
-        forward_kinematics,
-        inverse_kinematics,
-        delayed_sweep
+        timeout_duration_arg,
+        parameter_sweep
     ])
