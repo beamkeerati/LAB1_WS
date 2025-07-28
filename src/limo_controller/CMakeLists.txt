@@ -37,8 +37,8 @@ install(PROGRAMS
   scripts/gps_emulator.py
   scripts/ekf.py
   scripts/mpc_evaluator.py
-  scripts/parameter_sweep.py
-  config/mpc_sweep_config.yaml
+  # scripts/parameter_sweep.py
+  # config/mpc_sweep_config.yaml
   scripts/comparative_analyzer.py
   DESTINATION lib/${PROJECT_NAME}
 )
