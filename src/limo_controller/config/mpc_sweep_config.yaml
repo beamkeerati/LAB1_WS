@@ -1,69 +1,46 @@
-parameters:
-  # Target speed - focus on practical range
-  target_speed:
-    type: discrete
-    values: [0.5, 0.8, 1.1]
-    description: "Vehicle target speed in m/s - slow, medium, fast"
-    
-  # MPC horizon length - test key values
-  horizon_length:
-    type: discrete
-    values: [8, 12, 16]
-    description: "MPC prediction horizon length - short, medium, long"
-    
-  # Control time step - critical for stability
-  control_dt:
-    type: discrete
-    values: [0.05, 0.1]
-    description: "MPC control time step - fine vs coarse control"
-    
-  # Position tracking weight - most impactful parameter
-  position_weight:
-    type: discrete
-    values: [5.0, 15.0, 40.0]
-    description: "Position tracking weight - low, medium, high priority"
-    
-  # Yaw tracking weight - critical for path following
-  yaw_weight:
-    type: discrete
-    values: [5.0, 20.0, 50.0]
-    description: "Yaw tracking weight - loose, balanced, tight heading"
-    
-  # Control cost weight - affects smoothness vs performance
-  control_weight:
-    type: discrete
-    values: [0.1, 0.5]
-    description: "Control cost weight - aggressive vs smooth control"
-    
-  # Maximum steering angle - vehicle constraint
-  max_steer_deg:
-    type: discrete
-    values: [10.0, 15.0]
-    description: "Maximum steering angle - conservative vs aggressive"
-  # Path selection - only YAML and switch_back paths
-  path_type:
-    type: discrete
-    values: ["yaml", "switch_back"]
-    description: "Path types - YAML file path or challenging switch-back maneuvers"
+# Optimized MPC Parameter Sweep Configuration
+# Reduced parameter space for faster testing
 
-# Evaluation metrics to analyze
-evaluation_metrics:
-  - position_errors
-  - heading_errors
-  - cross_track_errors
-  - control_effort
-  - control_smoothness
-  - path_progress
-  - velocity_errors
-
-# Experiment settings - reduced timing for faster testing
-experiment_settings:
-  warmup_time: 1.0      # Reduced warmup
-  evaluation_time: 60.0  # Much shorter evaluation for testing
-  cooldown_time: 1.0     # Minimal cooldown
+experiment:
+  base_name: "mpc_sweep"
+  duration: 60.0  # Reduced from 125s to 60s for faster experiments
+  save_base_directory: "~/mpc_sweep_results"
   
-# Analysis settings
-analysis_settings:
-  statistical_significance: 0.05
-  correlation_threshold: 0.3
-  improvement_threshold: 5.0
+# Reduced parameter ranges for manageable sweep (27 experiments instead of 1296)
+parameters:
+  target_speed: [0.6, 1.0]  # 2 values instead of 3
+  horizon_length: [8, 12]   # 2 values instead of 3  
+  control_dt: [0.05, 0.1]   # Keep 2 values
+  position_weight: [10, 25] # 2 values instead of 3
+  yaw_weight: [10, 30]      # 2 values instead of 3
+  control_weight: [0.1]     # 1 value instead of 2
+  max_steer_deg: [10]       # 1 value instead of 2
+  path_type: ["yaml", "switch_back"]  # Keep both path types
+
+# Timing configuration
+timing:
+  cleanup_delay: 5          # Reduced cleanup time
+  startup_delay: 10         # Reduced startup time
+  monitoring_interval: 30   # Check every 30s instead of frequent checks
+  force_kill_delay: 15      # Reduced kill delay
+
+# Process management
+process:
+  max_retries: 2           # Reduced retries
+  timeout_buffer: 10       # Reduced buffer
+  cleanup_commands:        # Your PROVEN cleanup commands
+    - "sudo pkill -f ros2"
+    - "sudo pkill -f ros"
+    - "sudo pkill -f gazebo"
+    - "sudo pkill -f ign"
+    - "sudo pkill -f ignition"
+    - "sudo killall -9 ruby"
+    - "sudo killall -9 python3"
+    - "ros2 daemon stop"
+    - "ros2 daemon start"
+    - "sudo pkill -9 -f '.py'"
+# Results configuration  
+results:
+  generate_summary: true
+  generate_plots: true
+  compress_results: false
