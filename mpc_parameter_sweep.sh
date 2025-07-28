@@ -2,7 +2,7 @@
 
 # Improved MPC Parameter Sweep Script
 # Author: Generated for LIMO MPC Controller
-# Version: 2.2 (Integer Arithmetic Fix)
+# Version: 2.8 (Loop Iteration Fix)
 
 set -e  # Exit on any error
 
@@ -11,10 +11,18 @@ set -e  # Exit on any error
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_DIR="$SCRIPT_DIR"  # Script is in the workspace root (LAB1_WS)
-CONFIG_FILE="$WORKSPACE_DIR/src/limo_controller/config/mpc_sweep_config.yaml"
+WORKSPACE_DIR="$SCRIPT_DIR"
+CONFIG_DIR="$WORKSPACE_DIR/src/limo_controller/config"
+CONFIG_FILE="$CONFIG_DIR/mpc_sweep_config.yaml"
+WORKSPACE_SETUP_FILE="$WORKSPACE_DIR/install/setup.bash"
+
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 RESULTS_BASE_DIR="$HOME/mpc_sweep_results/sweep_$TIMESTAMP"
+
+# --- Automation Behavior ---
+SHOW_REALTIME_LOGS=true
+RUN_HEADLESS=false
+
 
 # Colors and formatting
 RED='\033[0;31m'
@@ -57,25 +65,20 @@ log_header() {
     echo -e "${BOLD}${PURPLE}$1${NC}"
 }
 
-# Improved cleanup function - PROVEN COMMANDS
+# Improved cleanup function
 cleanup_ros2() {
     log_info "🔥 Cleaning up ALL ROS2 and Gazebo processes (AGGRESSIVE MODE)..."
     
-    # This kills ALL ROS2 and Gazebo processes system-wide - PROVEN TO WORK
     sudo pkill -f ros2
     sudo pkill -f ros  
     sudo pkill -f gazebo
     sudo pkill -f ign
     sudo pkill -f ignition
-    sudo killall -9 ruby
-    sudo killall -9 python3
     
-    # Clean up ROS2 daemon
-    ros2 daemon stop
-    ros2 daemon start
-    
-    # Final cleanup - kill any remaining Python processes
-    sudo pkill -9 -f ".py"
+    # FIX: Redirect stdin from /dev/null to prevent these commands from
+    # consuming the input of the main 'while read' loop.
+    ros2 daemon stop < /dev/null
+    ros2 daemon start < /dev/null
     
     sleep $CLEANUP_DELAY
 }
@@ -104,13 +107,11 @@ parse_config() {
     
     log_info "Parsing parameter configuration from $CONFIG_FILE"
     
-    # Check if config file exists
     if [[ ! -f "$CONFIG_FILE" ]]; then
         log_error "Configuration file not found: $CONFIG_FILE"
         exit 1
     fi
     
-    # Use Python to parse YAML and generate parameter combinations
     python3 << EOF
 import yaml
 import itertools
@@ -120,24 +121,19 @@ try:
     with open('$CONFIG_FILE', 'r') as f:
         config = yaml.safe_load(f)
     
-    # Extract parameters
     params = config['parameters']
     
-    # Print parameter ranges for logging
     for key, values in params.items():
         print(f"PARAM_{key.upper()}=(" + " ".join(map(str, values)) + ")")
     
-    # Generate all combinations
     keys = list(params.keys())
     values = [params[key] for key in keys]
     combinations = list(itertools.product(*values))
     
     print(f"TOTAL_EXPERIMENTS={len(combinations)}")
-    # FIX: Cast duration to an integer to prevent shell arithmetic errors
     duration = int(config.get('experiment', {}).get('duration', $DEFAULT_EXPERIMENT_DURATION))
     print(f"EXPERIMENT_DURATION={duration}")
     
-    # Write combinations to temporary file
     with open('/tmp/mpc_combinations.txt', 'w') as f:
         for i, combo in enumerate(combinations):
             f.write(f"{i}:" + ":".join(map(str, combo)) + "\n")
@@ -152,7 +148,6 @@ EOF
         exit 1
     fi
     
-    # Source the generated parameter ranges
     source <(python3 << EOF
 import yaml
 with open('$CONFIG_FILE', 'r') as f:
@@ -162,7 +157,6 @@ for key, values in params.items():
     print(f"PARAM_{key.upper()}=(" + " ".join(map(str, values)) + ")")
 config_exp = config.get('experiment', {})
 print(f"TOTAL_EXPERIMENTS=$(wc -l < /tmp/mpc_combinations.txt)")
-# FIX: Cast duration to an integer to prevent shell arithmetic errors
 duration = int(config_exp.get('duration', 60))
 print(f"EXPERIMENT_DURATION={duration}")
 EOF
@@ -199,7 +193,6 @@ run_experiment() {
     local exp_dir="$RESULTS_BASE_DIR/$exp_name"
     local results_dir="$exp_dir/results"
     
-    # Create experiment directory
     mkdir -p "$results_dir"
     
     log_header "===================================================="
@@ -216,10 +209,8 @@ run_experiment() {
     log_info "  path_type: $path_type"
     log_header "===================================================="
     
-    # Cleanup before starting
     cleanup_ros2
     
-    # Wait for ROS2 to be ready
     log_info "Waiting for ROS2 to be ready..."
     if check_ros2_ready; then
         log_success "ROS2 is ready"
@@ -230,37 +221,40 @@ run_experiment() {
     
     sleep $STARTUP_DELAY
     
-    # Build launch command
     local launch_cmd="ros2 launch limo_controller mpc_single_evaluation.launch.py"
     launch_cmd+=" experiment_name:=$exp_name"
-    launch_cmd+=" duration:=$EXPERIMENT_DURATION"
+    launch_cmd+=" duration:=${EXPERIMENT_DURATION}.0"
     launch_cmd+=" target_speed:=$target_speed"
     launch_cmd+=" horizon_length:=$horizon_length"
     launch_cmd+=" control_dt:=$control_dt"
     launch_cmd+=" save_directory:=$results_dir"
-    launch_cmd+=" position_weight:=$position_weight"
-    launch_cmd+=" yaw_weight:=$yaw_weight"
+    launch_cmd+=" position_weight:=${position_weight}.0"
+    launch_cmd+=" yaw_weight:=${yaw_weight}.0"
     launch_cmd+=" control_weight:=$control_weight"
-    launch_cmd+=" max_steer_deg:=$max_steer_deg"
+    launch_cmd+=" max_steer_deg:=${max_steer_deg}.0"
     launch_cmd+=" path_type:=$path_type"
     
     if [[ "$path_type" == "yaml" ]]; then
         launch_cmd+=" yaml_path_file:=path.yaml"
     fi
     
+    launch_cmd+=" headless:=$RUN_HEADLESS"
+    
     log_info "Starting launch command: $launch_cmd"
     
-    # Start experiment in background
-    $launch_cmd > "$exp_dir/launch.log" 2>&1 &
+    if [[ "$SHOW_REALTIME_LOGS" == "true" ]]; then
+        $launch_cmd 2>&1 | tee "$exp_dir/launch.log" &
+    else
+        $launch_cmd > "$exp_dir/launch.log" 2>&1 &
+    fi
     local launch_pid=$!
     
     log_info "Launch process started with PID: $launch_pid"
     
-    # Monitor experiment
     local elapsed=0
-    local timeout=$((EXPERIMENT_DURATION + 30))  # Add buffer
+    local timeout=$((EXPERIMENT_DURATION + 30))
     
-    sleep 10  # Let the system start up
+    sleep 10
     log_info "Monitoring experiment: $exp_name (timeout: ${timeout}s)"
     
     while [[ $elapsed -lt $timeout ]]; do
@@ -269,21 +263,24 @@ run_experiment() {
             break
         fi
         
-        sleep $MONITORING_INTERVAL
-        elapsed=$((elapsed + MONITORING_INTERVAL))
-        
-        if [[ $elapsed -lt $timeout ]]; then
-            local remaining=$((timeout - elapsed))
-            log_info "Experiment running... ${elapsed}s elapsed, ${remaining}s remaining"
+        if [[ "$SHOW_REALTIME_LOGS" != "true" ]]; then
+            sleep $MONITORING_INTERVAL
+            elapsed=$((elapsed + MONITORING_INTERVAL))
+            
+            if [[ $elapsed -lt $timeout ]]; then
+                local remaining=$((timeout - elapsed))
+                log_info "Experiment running... ${elapsed}s elapsed, ${remaining}s remaining"
+            fi
+        else
+            sleep 1
+            elapsed=$((elapsed + 1))
         fi
     done
     
-    # Check if experiment completed or needs to be terminated
     if [[ $elapsed -ge $EXPERIMENT_DURATION ]]; then
         log_info "Evaluation duration reached, waiting for evaluator to save results..."
-        sleep 10  # Give evaluator time to save
+        sleep 10
         
-        # Check if results were saved
         if ls "$results_dir"/*.json >/dev/null 2>&1; then
             log_success "Results already saved by evaluator"
         else
@@ -294,7 +291,6 @@ run_experiment() {
     
     log_info "Experiment monitoring completed after $elapsed seconds"
     
-    # Terminate launch process if still running
     if kill -0 $launch_pid 2>/dev/null; then
         log_info "Terminating launch process (PID: $launch_pid)"
         kill -TERM $launch_pid 2>/dev/null || true
@@ -306,13 +302,10 @@ run_experiment() {
         fi
     fi
     
-    # Final cleanup
     cleanup_ros2
     
-    # Create experiment summary
     create_experiment_summary "$exp_dir" "$exp_name" "$target_speed" "$horizon_length" "$control_dt" "$position_weight" "$yaw_weight" "$control_weight" "$max_steer_deg" "$path_type"
     
-    # Check if experiment was successful
     if ls "$results_dir"/*.json >/dev/null 2>&1; then
         log_success "Experiment $exp_name completed with results"
         return 0
@@ -392,7 +385,6 @@ EOF
 main() {
     log_header "Starting MPC Parameter Sweep"
     
-    # Validate environment
     if [[ ! -d "$WORKSPACE_DIR" ]]; then
         log_error "Workspace directory not found: $WORKSPACE_DIR"
         exit 1
@@ -406,10 +398,17 @@ main() {
     log_success "✅ Workspace validation passed"
     log_info "📁 Working from: $WORKSPACE_DIR"
     
-    # Parse configuration
+    if [[ -f "$WORKSPACE_SETUP_FILE" ]]; then
+        log_info "Sourcing ROS2 workspace: $WORKSPACE_SETUP_FILE"
+        source "$WORKSPACE_SETUP_FILE"
+    else
+        log_error "Workspace setup file not found: $WORKSPACE_SETUP_FILE"
+        log_error "Please build your workspace using 'colcon build'."
+        exit 1
+    fi
+    
     parse_config
     
-    # Log parameter ranges
     log_info "Parameter ranges detected:"
     echo "$(python3 << EOF
 import yaml
@@ -425,15 +424,11 @@ EOF
     local estimated_time=$((TOTAL_EXPERIMENTS * (EXPERIMENT_DURATION + 45) / 60))
     log_info "Estimated total time: $estimated_time minutes"
     
-    # Setup results directory
-    log_info "Setting up result directories"
     mkdir -p "$RESULTS_BASE_DIR"
     log_info "Results will be saved to: $RESULTS_BASE_DIR"
     
-    # Initial cleanup and setup
     cleanup_ros2
     
-    # Check ROS2 readiness
     log_info "Waiting for ROS2 to be ready..."
     if check_ros2_ready; then
         log_success "ROS2 is ready"
@@ -444,11 +439,9 @@ EOF
     
     log_info "Starting parameter sweep with $TOTAL_EXPERIMENTS experiments"
     
-    # Track experiment results
     local successful_experiments=0
     local failed_experiments=0
     
-    # Read combinations and run experiments
     local exp_num=1
     while IFS=':' read -r index target_speed horizon_length control_dt position_weight yaw_weight control_weight max_steer_deg path_type; do
         local exp_name=$(generate_experiment_name "$target_speed" "$horizon_length" "$control_dt" "$position_weight" "$yaw_weight" "$control_weight" "$max_steer_deg" "$path_type")
@@ -461,12 +454,10 @@ EOF
         
         ((exp_num++))
         
-        # Brief pause between experiments
         sleep 2
         
     done < /tmp/mpc_combinations.txt
     
-    # Final summary
     log_header "=========================================="
     log_header "PARAMETER SWEEP COMPLETED"
     log_header "=========================================="
@@ -474,7 +465,6 @@ EOF
     log_error "❌ Failed experiments: $failed_experiments"
     log_info "📁 Results directory: $RESULTS_BASE_DIR"
     
-    # Create overall summary
     create_overall_summary "$successful_experiments" "$failed_experiments"
     
     if [[ $successful_experiments -gt 0 ]]; then
@@ -527,7 +517,7 @@ EOF
     echo "- \`results/*.md\` - Detailed analysis reports" >> "$overall_summary"
     echo "" >> "$overall_summary"
     echo "---" >> "$overall_summary"
-    echo "*Generated by MPC Parameter Sweep Script v2.2*" >> "$overall_summary"
+    echo "*Generated by MPC Parameter Sweep Script v2.8*" >> "$overall_summary"
     
     log_success "Overall summary created: $overall_summary"
 }
