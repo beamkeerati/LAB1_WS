@@ -56,26 +56,20 @@ def generate_launch_description():
         description='Directory to save results'
     )
     
-    # NEW: Path configuration arguments
+    # Path configuration arguments - UPDATED with clearer options
     path_type_arg = DeclareLaunchArgument(
         'path_type',
         default_value='yaml',
-        description='Path type: yaml, straight, straight2, straight3, forward, switch_back'
-    )
-    
-    use_yaml_path_arg = DeclareLaunchArgument(
-        'use_yaml_path',
-        default_value='true',
-        description='Use YAML file for path (true) or built-in generator (false)'
+        description='Path type: "yaml" for YAML file, "switch_back" for built-in switch back course'
     )
     
     yaml_path_file_arg = DeclareLaunchArgument(
         'yaml_path_file',
         default_value='path.yaml',
-        description='YAML path file name (when use_yaml_path=true)'
+        description='YAML path file name (only used when path_type=yaml)'
     )
     
-    # NEW: MPC tuning parameters
+    # MPC tuning parameters
     position_weight_arg = DeclareLaunchArgument(
         'position_weight',
         default_value='10.0',
@@ -145,7 +139,6 @@ def generate_launch_description():
             {'yaw_weight': LaunchConfiguration('yaw_weight')},
             {'control_weight': LaunchConfiguration('control_weight')},
             {'path_type': LaunchConfiguration('path_type')},
-            {'use_yaml_path': LaunchConfiguration('use_yaml_path')},
             {'yaml_path_file': LaunchConfiguration('yaml_path_file')},
             {'mode': 'car'}
         ]
@@ -186,7 +179,6 @@ def generate_launch_description():
         control_dt_arg,
         save_dir_arg,
         path_type_arg,
-        use_yaml_path_arg,
         yaml_path_file_arg,
         position_weight_arg,
         yaw_weight_arg,

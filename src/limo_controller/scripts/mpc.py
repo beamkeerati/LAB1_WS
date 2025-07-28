@@ -51,7 +51,7 @@ from limo_controller.mpc_lib import (
     calc_nearest_index,
     calc_ref_trajectory,
     iterative_linear_mpc_control,
-    get_switch_back_course  # Only import switch_back path generator
+    get_switch_back_course  # Import the switch_back path generator
 )
 
 
@@ -213,9 +213,8 @@ class MPCNode(Node):
         self._declare_parameter_if_not_exists("yaw_weight", 15.0)
         self._declare_parameter_if_not_exists("control_weight", 0.1)
         
-        # UPDATED: Path selection parameters - only YAML and switch_back
-        self._declare_parameter_if_not_exists("path_type", "yaml")  # Default to YAML
-        self._declare_parameter_if_not_exists("use_yaml_path", True)  # Backward compatibility
+        # Path selection parameters - SIMPLIFIED to just path_type and yaml_path_file
+        self._declare_parameter_if_not_exists("path_type", "yaml")  # "yaml" or "switch_back"
         self._declare_parameter_if_not_exists("yaml_path_file", "path.yaml")  # Custom YAML file
 
         # Update config from ROS parameters
@@ -243,11 +242,6 @@ class MPCNode(Node):
             self.path_type = self.get_parameter("path_type").get_parameter_value().string_value
         except:
             self.path_type = "yaml"
-
-        try:
-            self.use_yaml_path = self.get_parameter("use_yaml_path").get_parameter_value().bool_value
-        except:
-            self.use_yaml_path = True
 
         try:
             self.yaml_path_file = self.get_parameter("yaml_path_file").get_parameter_value().string_value
@@ -319,7 +313,7 @@ class MPCNode(Node):
         # Initialize MPC
         if self.path_loaded:
             self.init_mpc()
-            path_source = "YAML file" if self.use_yaml_path else f"built-in generator ({self.path_type})"
+            path_source = "YAML file" if self.path_type == "yaml" else f"built-in generator ({self.path_type})"
             self.get_logger().info(f"MPC Controller initialized with path from: {path_source}")
         else:
             self.get_logger().error("Failed to initialize MPC - no valid path")
@@ -333,14 +327,16 @@ class MPCNode(Node):
 
     def initialize_path(self):
         """Initialize path based on configuration parameters"""
-        # Determine path source based on parameters
-        if self.use_yaml_path or self.path_type == "yaml":
+        if self.path_type == "yaml":
             return self.load_path_from_yaml()
+        elif self.path_type == "switch_back":
+            return self.generate_switch_back_path()
         else:
-            return self.generate_path_from_type()
+            self.get_logger().error(f"Unsupported path type: {self.path_type}. Supported types: 'yaml', 'switch_back'")
+            return False
 
     def load_path_from_yaml(self):
-        """Load path from YAML file (original method)"""
+        """Load path from YAML file"""
         try:
             pkg = get_package_share_directory("limo_controller")
             yaml_path = os.path.join(pkg, "path", self.yaml_path_file)
@@ -387,31 +383,27 @@ class MPCNode(Node):
             self.get_logger().error(f"Error reading path file: {e}")
             return False
 
-    def generate_path_from_type(self):
-        """Generate path based on path_type parameter (new method) - only switch_back supported"""
+    def generate_switch_back_path(self):
+        """Generate switch back path using built-in generator"""
         try:
             # Calculate path distance for interpolation
-            dl = 0.1  # Default path resolution
+            dl = 0.1  # Path resolution
             
-            # UPDATED: Only support switch_back path generator
-            if self.path_type == "switch_back":
-                self.cx, self.cy, self.cyaw, self.ck = get_switch_back_course(dl)
-                self.get_logger().info(f"Generated switch_back path with {len(self.cx)} points")
-                
-                # Initialize path parameters
-                self.sp = calc_speed_profile(
-                    self.cx, self.cy, self.cyaw, MPCConfig.TARGET_SPEED, MPCConfig
-                )
-                self.dl = calculate_path_distance(self.cx, self.cy)
-                self.cyaw = smooth_yaw(self.cyaw, MPCConfig)
-                
-                return True
-            else:
-                self.get_logger().error(f"Unsupported path type: {self.path_type}. Only 'yaml' and 'switch_back' are supported.")
-                return False
+            # Generate switch_back path using the function from mpc_lib
+            self.cx, self.cy, self.cyaw, self.ck = get_switch_back_course(dl)
+            self.get_logger().info(f"Generated switch_back path with {len(self.cx)} points")
+            
+            # Initialize path parameters
+            self.sp = calc_speed_profile(
+                self.cx, self.cy, self.cyaw, MPCConfig.TARGET_SPEED, MPCConfig
+            )
+            self.dl = calculate_path_distance(self.cx, self.cy)
+            self.cyaw = smooth_yaw(self.cyaw, MPCConfig)
+            
+            return True
                 
         except Exception as e:
-            self.get_logger().error(f"Error generating path: {e}")
+            self.get_logger().error(f"Error generating switch_back path: {e}")
             return False
 
     def parameter_update_callback(self, msg):
@@ -438,12 +430,6 @@ class MPCNode(Node):
                     old_path_type = self.path_type
                     self.path_type = params['path_type']
                     
-                    # Update path source logic
-                    if self.path_type == "yaml":
-                        self.use_yaml_path = True
-                    else:
-                        self.use_yaml_path = False
-                    
                     # Regenerate path if needed
                     if self.path_type != old_path_type:
                         if self.initialize_path():
@@ -457,7 +443,7 @@ class MPCNode(Node):
                 # Handle YAML path file changes
                 if 'yaml_path_file' in params:
                     self.yaml_path_file = params['yaml_path_file']
-                    if self.use_yaml_path:
+                    if self.path_type == "yaml":
                         if self.initialize_path():
                             self.publish_path()
                             self.init_mpc()
