@@ -40,7 +40,7 @@ def generate_launch_description():
     
     horizon_arg = DeclareLaunchArgument(
         'horizon_length',
-        default_value='10',
+        default_value='50',
         description='MPC prediction horizon length'
     )
     
